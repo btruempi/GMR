@@ -1,0 +1,44 @@
+name: Refresh baked quotes
+
+# Keeps data/quotes/*.json fresh so the site loads real prices same-origin
+# (no CORS proxy needed). No secrets required -- only contents:write.
+
+on:
+  schedule:
+    # every 30 min during US market hours (13:00-20:59 UTC, Mon-Fri)
+    - cron: "*/30 13-20 * * 1-5"
+    # once more after the close so the last bar is final
+    - cron: "30 21 * * 1-5"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-quotes
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch quotes
+        run: python3 scripts/fetch_quotes.py
+
+      - name: Commit refreshed quotes
+        run: |
+          if ! git diff --quiet -- data/quotes; then
+            git config user.name "gmr-bot"
+            git config user.email "gmr-bot@users.noreply.github.com"
+            git add data/quotes
+            git commit -m "Refresh baked quotes [skip ci]"
+            git push
+          else
+            echo "No quote changes to commit."
+          fi

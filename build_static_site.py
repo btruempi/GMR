@@ -612,7 +612,21 @@ function getSeries(ticker, range){
   var yahooUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(ticker) + "?range=" + range + "&interval=1d";
   var stooqUrl = "https://stooq.com/q/d/l/?s=" + encodeURIComponent(ticker.toLowerCase()) + ".us&i=d";
 
-  // One attempt = full proxy chain against Yahoo, then Stooq as a backup source.
+  // 1) Baked same-origin data, refreshed by the refresh-quotes workflow. This
+  //    is served from our own GitHub Pages origin, so there is NO CORS and no
+  //    proxy dependency -- it is the reliable path and covers every constituent
+  //    + preset ticker. (Files live at data/quotes/{TICKER}.json.)
+  function baked(){
+    return fetch("data/quotes/" + encodeURIComponent(ticker) + ".json", {cache:"default"})
+      .then(function(r){ if (!r.ok) throw new Error("no baked " + r.status); return r.json(); })
+      .then(function(j){
+        if (!j.closes || j.closes.length < 5) throw new Error("baked too short");
+        return {dates:j.dates, closes:j.closes, volumes:j.volumes, updated:j.updated};
+      });
+  }
+
+  // 2) Live proxy chain against Yahoo, then Stooq -- used for arbitrary tickers
+  //    (Companies search) not in the baked set, or when baked data is missing.
   function attempt(){
     return fetchViaProxies(yahooUrl)
       .then(function(txt){ return parseYahooChart(txt); })
@@ -625,18 +639,19 @@ function getSeries(ticker, range){
       });
   }
 
-  // allorigins throws Cloudflare 5xx under load, so retry the whole chain once
-  // (short backoff) before accepting the synthetic fallback.
-  return attempt()
+  return baked()
     .catch(function(){
-      return new Promise(function(res){ setTimeout(res, 700); }).then(attempt);
+      // not baked -- try the live proxy chain, retrying once (allorigins 5xx).
+      return attempt().catch(function(){
+        return new Promise(function(res){ setTimeout(res, 700); }).then(attempt);
+      });
     })
     .then(function(series){
       STATE.seriesCache[cacheKey] = series;
       return series;
     })
     .catch(function(err){
-      console.warn("GMR: live fetch failed for " + ticker + ", using synthetic series.", err);
+      console.warn("GMR: no baked or live data for " + ticker + ", using synthetic series.", err);
       var rangeDays = {"1y":260,"2y":520,"5y":1300,"10y":2600,"max":2600}[range] || 260;
       var s = syntheticSeries(ticker, rangeDays);
       STATE.seriesCache[cacheKey] = s;

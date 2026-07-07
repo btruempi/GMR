@@ -68,15 +68,28 @@ prints your live GitHub Pages URL and the three remaining manual steps.
 
 ## How live data works
 
-The browser fetches prices client-side (no key) through a rotating chain of
-public CORS proxies wrapping **Yahoo Finance** JSON and **Stooq** daily CSV. The
-chain tracks proxy health in `localStorage`, prefers the last-known-good route,
-and auto-deprioritizes failing proxies. If every proxy is down, the page falls
-back to a deterministic synthetic series so nothing ever renders blank. Chart.js
-is inlined at build time, so the UI works offline.
+Prices come from a three-tier chain, most-reliable first:
 
-Server-side (in GitHub Actions) the Python alert script uses `urllib` directly —
-no CORS needed — with the same Yahoo→Stooq→synthetic fallback.
+1. **Baked, same-origin data (primary).** `scripts/fetch_quotes.py` runs in
+   GitHub Actions (`refresh-quotes.yml`, every 30 min during market hours),
+   fetches ~2y of daily history for every constituent + preset ticker via
+   `urllib` (no CORS server-side), and commits `data/quotes/{TICKER}.json`.
+   GitHub Pages serves those files from **your own origin**, so the site loads
+   real prices with **zero proxy dependency** — this is what makes it reliable.
+2. **Live CORS proxies (fallback).** For arbitrary tickers you search on the
+   Companies tab (not in the baked set), the browser tries a rotating chain of
+   public CORS proxies wrapping Yahoo/Stooq, with `localStorage` health
+   tracking. Free proxies are flaky, so this is best-effort only.
+3. **Synthetic series (last resort).** A deterministic seeded random walk so
+   nothing ever renders blank if both above fail.
+
+Chart.js is inlined at build time, so the UI works offline. The server-side
+alert script (`maybe_send_email.py`) reads the same baked `data/quotes/*.json`
+first, so alerts evaluate against identical data with no network call.
+
+> The baked snapshot is as fresh as the last `refresh-quotes` run (every 30 min
+> in market hours). Run `python3 scripts/fetch_quotes.py` locally + rebuild to
+> refresh on demand.
 
 ---
 

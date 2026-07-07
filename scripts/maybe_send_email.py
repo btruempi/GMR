@@ -64,8 +64,21 @@ def synthetic_series(ticker, days=260):
 
 
 def fetch_series(ticker):
-    """Yahoo first, Stooq fallback, synthetic series if both fail (gotcha #5:
-    log clearly and keep going rather than crashing the whole run)."""
+    """Baked quotes first (data/quotes/{TICKER}.json, refreshed by the
+    refresh-quotes workflow), then live Yahoo, then Stooq, then a synthetic
+    series if everything fails (gotcha #5: log clearly and keep going rather
+    than crashing the whole run)."""
+    baked_path = os.path.join(ROOT, "data", "quotes", ticker.upper() + ".json")
+    if os.path.exists(baked_path):
+        try:
+            with open(baked_path, encoding="utf-8") as f:
+                j = json.load(f)
+            if len(j.get("closes", [])) >= 5:
+                return {"dates": j["dates"], "closes": j["closes"],
+                        "volumes": j["volumes"], "synthetic": False}
+        except Exception as e:
+            print(f"[GMR] Baked quote read failed for {ticker}: {e}")
+
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=1y&interval=1d"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
