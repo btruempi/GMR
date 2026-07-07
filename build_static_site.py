@@ -1134,7 +1134,221 @@ function renderCompareChart(){
 }
 """
 
-APP_JS = JS_OPEN + JS_CORE + JS_PROXY + JS_ROUTER + JS_DASHBOARD + JS_WATCHLISTS + JS_COMPANIES + JS_CLOSE
+JS_OPTIMIZER = r"""
+// ---- Optimizer tab ---------------------------------------------------
+var OPT_CAP = lsGet("optCap", 0.20);
+var OPT_UNIVERSE_KEY = null;
+var OPT_SELECTED = null; // {vol, ret, weights, tickers}
+var OPT_SAMPLES = null;
+
+function optUniverseTickers(){
+  var key = STATE.watchlists.active;
+  var list = key && STATE.watchlists.lists[key];
+  if (list && list.tickers.length >= 2) { OPT_UNIVERSE_KEY = key; return list.tickers; }
+  OPT_UNIVERSE_KEY = "nuclear (default)";
+  return STATE.constituents.map(function(c){ return c.ticker; });
+}
+
+function dailyReturns(closes){
+  var r = []; for (var i=1;i<closes.length;i++) r.push(closes[i]/closes[i-1]-1);
+  return r;
+}
+function mean(arr){ return arr.reduce(function(a,b){return a+b;},0)/arr.length; }
+function covMatrix(returnsMatrix){
+  var n = returnsMatrix.length, m = returnsMatrix[0].length;
+  var means = returnsMatrix.map(mean);
+  var cov = [];
+  for (var i=0;i<n;i++){
+    cov.push([]);
+    for (var j=0;j<n;j++){
+      var s = 0;
+      for (var t=0;t<m;t++) s += (returnsMatrix[i][t]-means[i])*(returnsMatrix[j][t]-means[j]);
+      cov[i].push(s/m);
+    }
+  }
+  return cov;
+}
+function applyCapAndRenormalize(weights, cap){
+  var w = weights.slice();
+  for (var iter=0; iter<20; iter++){
+    var over = w.map(function(x){ return x>cap; });
+    if (!over.some(Boolean)) break;
+    var excess = 0;
+    for (var i=0;i<w.length;i++){ if (over[i]){ excess += w[i]-cap; w[i]=cap; } }
+    var freeIdx = []; for (i=0;i<w.length;i++) if (!over[i]) freeIdx.push(i);
+    var freeSum = freeIdx.reduce(function(a,i){return a+w[i];},0);
+    if (!freeIdx.length || freeSum<=0) break;
+    freeIdx.forEach(function(i){ w[i] += excess * (w[i]/freeSum); });
+  }
+  var total = w.reduce(function(a,b){return a+b;},0);
+  return w.map(function(x){ return x/total; });
+}
+function randomWeights(n){
+  var raw = []; for (var i=0;i<n;i++) raw.push(-Math.log(Math.random()));
+  var sum = raw.reduce(function(a,b){return a+b;},0);
+  return raw.map(function(x){ return x/sum; });
+}
+function portfolioStats(w, meanRet, cov, rf){
+  var ret = 0; for (var i=0;i<w.length;i++) ret += w[i]*meanRet[i];
+  var variance = 0;
+  for (i=0;i<w.length;i++) for (var j=0;j<w.length;j++) variance += w[i]*w[j]*cov[i][j];
+  var vol = Math.sqrt(Math.max(0,variance));
+  var sharpe = vol>0 ? (ret-rf)/vol : 0;
+  return {ret:ret, vol:vol, sharpe:sharpe};
+}
+
+RENDERERS.optimizer = function(root){
+  var tickers = optUniverseTickers();
+  root.innerHTML =
+    "<div class='card'>" +
+      "<h2>Optimizer</h2>" +
+      "<p class='muted small'>Universe: <b>" + esc(OPT_UNIVERSE_KEY) + "</b> (" + tickers.length + " names, from your active watchlist). Switch watchlists on the Watchlists tab to optimize a different basket.</p>" +
+      "<div class='row'><label style='margin:0'>Max position size:</label>" +
+        "<span class='chip" + (OPT_CAP===0.15?" active":"") + "' data-cap='0.15'>15%</span>" +
+        "<span class='chip" + (OPT_CAP===0.20?" active":"") + "' data-cap='0.20'>20%</span>" +
+        "<span class='chip" + (OPT_CAP===0.25?" active":"") + "' data-cap='0.25'>25%</span>" +
+      "</div>" +
+      "<div class='row' style='margin-top:8px'>" +
+        "<button class='btn small' data-objective='sharpe'>Max Sharpe</button>" +
+        "<button class='btn small secondary' data-objective='minvol'>Min Vol</button>" +
+        "<button class='btn small secondary' data-objective='equal'>Equal Weight</button>" +
+        "<button class='btn small secondary' data-objective='invvol'>Inverse Vol</button>" +
+      "</div>" +
+    "</div>" +
+    "<div class='card'>" +
+      "<h3>Efficient Frontier</h3>" +
+      "<p class='muted small'>Click anywhere on the frontier to snap to that mix and rebuild the weights table.</p>" +
+      "<div class='chart-wrap'><canvas id='opt-frontier-canvas'></canvas></div>" +
+    "</div>" +
+    "<div class='card' id='opt-weights-card'></div>";
+
+  $all("[data-cap]", root).forEach(function(b){
+    b.addEventListener("click", function(){ OPT_CAP = parseFloat(b.dataset.cap); lsSet("optCap", OPT_CAP); OPT_SAMPLES=null; showTab("optimizer"); });
+  });
+
+  runOptimizer(tickers).then(function(){
+    $all("[data-objective]", root).forEach(function(b){
+      b.addEventListener("click", function(){ selectByObjective(b.dataset.objective); });
+    });
+    selectByObjective("sharpe");
+  });
+};
+
+function runOptimizer(tickers){
+  return Promise.all(tickers.map(function(t){ return getSeries(t); })).then(function(seriesList){
+    var minLen = Math.min.apply(null, seriesList.map(function(s){ return s.closes.length; }));
+    var returnsMatrix = seriesList.map(function(s){ return dailyReturns(s.closes.slice(-minLen)); });
+    var meanRet = returnsMatrix.map(function(r){ return mean(r)*252; });
+    var cov = covMatrix(returnsMatrix).map(function(row){ return row.map(function(v){ return v*252; }); });
+    var n = tickers.length;
+    var rf = 0.04;
+    var samples = [];
+    var N = 2500;
+    for (var s=0; s<N; s++){
+      var w = applyCapAndRenormalize(randomWeights(n), OPT_CAP);
+      var stats = portfolioStats(w, meanRet, cov, rf);
+      samples.push({weights:w, ret:stats.ret, vol:stats.vol, sharpe:stats.sharpe});
+    }
+    // named strategies
+    var equalW = applyCapAndRenormalize(tickers.map(function(){ return 1/n; }), OPT_CAP);
+    var vols = tickers.map(function(_,i){ return Math.sqrt(cov[i][i]); });
+    var invVolRaw = vols.map(function(v){ return v>0 ? 1/v : 0; });
+    var invVolSum = invVolRaw.reduce(function(a,b){return a+b;},0);
+    var invVolW = applyCapAndRenormalize(invVolRaw.map(function(v){ return v/invVolSum; }), OPT_CAP);
+    var bestSharpe = samples.reduce(function(a,b){ return b.sharpe>a.sharpe ? b : a; });
+    var bestMinVol = samples.reduce(function(a,b){ return b.vol<a.vol ? b : a; });
+    OPT_SAMPLES = {
+      tickers: tickers, meanRet: meanRet, cov: cov, rf: rf, samples: samples,
+      named: {
+        sharpe: bestSharpe,
+        minvol: bestMinVol,
+        equal: {weights:equalW, ret:portfolioStats(equalW,meanRet,cov,rf).ret, vol:portfolioStats(equalW,meanRet,cov,rf).vol, sharpe:portfolioStats(equalW,meanRet,cov,rf).sharpe},
+        invvol: {weights:invVolW, ret:portfolioStats(invVolW,meanRet,cov,rf).ret, vol:portfolioStats(invVolW,meanRet,cov,rf).vol, sharpe:portfolioStats(invVolW,meanRet,cov,rf).sharpe}
+      }
+    };
+    renderFrontierChart();
+  }).catch(function(e){
+    console.error("GMR: optimizer failed", e);
+    $("#opt-weights-card").innerHTML = "<p class='muted small'>Could not compute the optimizer right now.</p>";
+  });
+}
+
+var OPT_CHART = null;
+function renderFrontierChart(){
+  var canvas = $("#opt-frontier-canvas");
+  var cloud = OPT_SAMPLES.samples.map(function(s){ return {x:s.vol*100, y:s.ret*100}; });
+  // frontier boundary: best return per vol bucket
+  var buckets = {};
+  OPT_SAMPLES.samples.forEach(function(s){
+    var key = Math.round(s.vol*200); // 0.5% bins
+    if (!buckets[key] || s.ret > buckets[key].ret) buckets[key] = s;
+  });
+  var frontier = Object.keys(buckets).map(function(k){ return buckets[k]; }).sort(function(a,b){ return a.vol-b.vol; });
+  var frontierPoints = frontier.map(function(s){ return {x:s.vol*100, y:s.ret*100}; });
+
+  if (OPT_CHART) OPT_CHART.destroy();
+  OPT_CHART = new Chart(canvas.getContext("2d"), {
+    type:"scatter",
+    data:{ datasets:[
+      { label:"Sampled portfolios", data:cloud, backgroundColor:"rgba(91,140,255,.25)", pointRadius:2 },
+      { label:"Efficient frontier", data:frontierPoints, showLine:true, borderColor:"#4fd1c5", backgroundColor:"transparent", pointRadius:0, borderWidth:2 },
+      { label:"Selected mix", data:[], backgroundColor:"#f6ad55", pointRadius:7, pointHoverRadius:8 }
+    ]},
+    options:{
+      maintainAspectRatio:false,
+      scales:{ x:{ title:{display:true,text:"Annualized Volatility %",color:"#93a2bb"}, ticks:{color:"#93a2bb"}, grid:{color:"#1b2536"} },
+               y:{ title:{display:true,text:"Annualized Return %",color:"#93a2bb"}, ticks:{color:"#93a2bb"}, grid:{color:"#1b2536"} } },
+      plugins:{ legend:{ labels:{color:"#93a2bb", boxWidth:12} } },
+      onClick: function(evt){
+        var pts = OPT_CHART.getElementsAtEventForMode(evt, "nearest", {intersect:false}, true);
+        if (!pts.length) return;
+        var dsIndex = pts[0].datasetIndex;
+        if (dsIndex === 2) return;
+        var idx = pts[0].index;
+        var pool = dsIndex === 1 ? frontier : OPT_SAMPLES.samples;
+        var chosen = pool[idx];
+        if (chosen) selectPortfolio(chosen);
+      }
+    }
+  });
+}
+
+function selectByObjective(key){
+  var named = OPT_SAMPLES.named[key];
+  selectPortfolio(named);
+  $all("[data-objective]", document).forEach(function(b){
+    b.className = "btn small" + (b.dataset.objective===key ? "" : " secondary");
+  });
+}
+
+function selectPortfolio(p){
+  OPT_SELECTED = p;
+  OPT_CHART.data.datasets[2].data = [{x:p.vol*100, y:p.ret*100}];
+  OPT_CHART.update();
+  renderWeightsTable(p);
+}
+
+function renderWeightsTable(p){
+  var root = $("#opt-weights-card");
+  var tickers = OPT_SAMPLES.tickers;
+  var rows = tickers.map(function(t,i){ return {ticker:t, weight:p.weights[i]}; }).sort(function(a,b){ return b.weight-a.weight; });
+  var html = "<h3>Weights for Selected Mix</h3>" +
+    "<div class='grid cols-3' style='margin-bottom:14px'>" +
+      "<div class='card'><h3>Expected Return</h3><div class='" + pctClass(p.ret*100) + "'>" + fmtPct(p.ret*100) + "</div></div>" +
+      "<div class='card'><h3>Volatility</h3><div>" + fmtNum(p.vol*100,1) + "%</div></div>" +
+      "<div class='card'><h3>Sharpe</h3><div>" + fmtNum(p.sharpe,2) + "</div></div>" +
+    "</div>" +
+    "<table><thead><tr><th>Ticker</th><th>Weight</th></tr></thead><tbody>";
+  rows.forEach(function(r){
+    if (r.weight < 0.001) return;
+    html += "<tr><td>" + esc(r.ticker) + "</td><td>" + fmtNum(r.weight*100,1) + "%</td></tr>";
+  });
+  html += "</tbody></table>";
+  root.innerHTML = html;
+}
+"""
+
+APP_JS = JS_OPEN + JS_CORE + JS_PROXY + JS_ROUTER + JS_DASHBOARD + JS_WATCHLISTS + JS_COMPANIES + JS_OPTIMIZER + JS_CLOSE
 
 
 if __name__ == "__main__":
