@@ -471,6 +471,8 @@ IND.obvNewHigh = function(obvSeries, n){
   if (window.length < 2) return false;
   return window[window.length-1] >= Math.max.apply(null, window);
 };
+// expose for console debugging / cross-checking against scripts/indicators.py
+try{ window.GMR = window.GMR || {}; window.GMR.IND = IND; }catch(e){}
 """
 
 JS_PROXY = r"""
