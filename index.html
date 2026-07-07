@@ -450,12 +450,13 @@ function parseStooqCsv(csv){
   });
   return out;
 }
-function syntheticSeries(ticker){
+function syntheticSeries(ticker, days){
+  days = days || 260;
   var seed = 0; for (var i=0;i<ticker.length;i++) seed += ticker.charCodeAt(i);
   var price = 40 + (seed % 60);
   var dates=[], closes=[], volumes=[];
-  var d = new Date(); d.setDate(d.getDate()-260);
-  for (i=0;i<260;i++){
+  var d = new Date(); d.setDate(d.getDate()-days);
+  for (i=0;i<days;i++){
     var day = d.getDay();
     if (day!==0 && day!==6){
       var rnd = Math.sin(seed + i*0.37)*0.015 + Math.cos(i*0.11)*0.008;
@@ -468,10 +469,12 @@ function syntheticSeries(ticker){
   }
   return {dates:dates, closes:closes, volumes:volumes, synthetic:true};
 }
-function getSeries(ticker){
+function getSeries(ticker, range){
   ticker = ticker.toUpperCase();
-  if (STATE.seriesCache[ticker]) return Promise.resolve(STATE.seriesCache[ticker]);
-  var yahooUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(ticker) + "?range=2y&interval=1d";
+  range = range || "2y";
+  var cacheKey = ticker + "::" + range;
+  if (STATE.seriesCache[cacheKey]) return Promise.resolve(STATE.seriesCache[cacheKey]);
+  var yahooUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(ticker) + "?range=" + range + "&interval=1d";
   var stooqUrl = "https://stooq.com/q/d/l/?s=" + encodeURIComponent(ticker.toLowerCase()) + ".us&i=d";
   return fetchViaProxies(yahooUrl)
     .then(function(txt){ return parseYahooChart(txt); })
@@ -480,13 +483,14 @@ function getSeries(ticker){
     })
     .then(function(series){
       if (!series.closes || series.closes.length < 5) throw new Error("no data");
-      STATE.seriesCache[ticker] = series;
+      STATE.seriesCache[cacheKey] = series;
       return series;
     })
     .catch(function(err){
       console.warn("GMR: live fetch failed for " + ticker + ", using synthetic series.", err);
-      var s = syntheticSeries(ticker);
-      STATE.seriesCache[ticker] = s;
+      var rangeDays = {"1y":260,"2y":520,"5y":1300,"10y":2600,"max":2600}[range] || 260;
+      var s = syntheticSeries(ticker, rangeDays);
+      STATE.seriesCache[cacheKey] = s;
       return s;
     });
 }
@@ -1246,6 +1250,177 @@ function renderWeightsTable(p){
   });
   html += "</tbody></table>";
   root.innerHTML = html;
+}
+
+// ---- Backtest tab ---------------------------------------------------
+var BT_LOOKBACK = lsGet("btLookback", "1Y");
+var BT_BENCH = lsGet("btBench", {SPY:true, URA:true, NLR:true});
+var BT_OVERLAYS = lsGet("btOverlays", {drawdown:false, sharpe:false});
+var LOOKBACK_YEARS = {"1Y":1, "2Y":2, "3Y":3, "5Y":5, "10Y":10, "Max":40};
+var BT_CHARTS = {};
+
+RENDERERS.backtest = function(root){
+  root.innerHTML =
+    "<div class='card'>" +
+      "<h2>Backtest</h2>" +
+      "<p class='muted small'>Composite is the featured Nuclear index (weighted by constituent). Benchmarks: SPY (S&amp;P 500), URA (uranium miners ETF), NLR (uranium + nuclear energy ETF).</p>" +
+      "<div class='row'><label style='margin:0'>Lookback:</label>" +
+        Object.keys(LOOKBACK_YEARS).map(function(k){ return "<span class='chip" + (BT_LOOKBACK===k?" active":"") + "' data-lookback='" + k + "'>" + k + "</span>"; }).join("") +
+      "</div>" +
+      "<div class='row' style='margin-top:8px'><label style='margin:0'>Benchmarks:</label>" +
+        Object.keys(BT_BENCH).map(function(k){ return "<span class='chip" + (BT_BENCH[k]?" active":"") + "' data-bench='" + k + "'>" + k + "</span>"; }).join("") +
+      "</div>" +
+      "<div class='row' style='margin-top:8px'>" +
+        "<span class='chip" + (BT_OVERLAYS.drawdown?" active":"") + "' data-overlay='drawdown'>Rolling Drawdown</span>" +
+        "<span class='chip" + (BT_OVERLAYS.sharpe?" active":"") + "' data-overlay='sharpe'>Rolling 63d Sharpe</span>" +
+      "</div>" +
+    "</div>" +
+    "<div class='card'><h3>Composite vs Benchmarks</h3><div class='chart-wrap'><canvas id='bt-perf-canvas'></canvas></div><div id='bt-stats'></div></div>" +
+    "<div id='bt-overlay-panels'></div>";
+
+  $all("[data-lookback]", root).forEach(function(b){
+    b.addEventListener("click", function(){ BT_LOOKBACK = b.dataset.lookback; lsSet("btLookback", BT_LOOKBACK); showTab("backtest"); });
+  });
+  $all("[data-bench]", root).forEach(function(b){
+    b.addEventListener("click", function(){ BT_BENCH[b.dataset.bench] = !BT_BENCH[b.dataset.bench]; lsSet("btBench", BT_BENCH); showTab("backtest"); });
+  });
+  $all("[data-overlay]", root).forEach(function(b){
+    b.addEventListener("click", function(){ BT_OVERLAYS[b.dataset.overlay] = !BT_OVERLAYS[b.dataset.overlay]; lsSet("btOverlays", BT_OVERLAYS); showTab("backtest"); });
+  });
+
+  runBacktest();
+};
+
+function cutoffDate(years){
+  var d = new Date(); d.setFullYear(d.getFullYear() - years);
+  return d.toISOString().slice(0,10);
+}
+
+function runBacktest(){
+  var cons = STATE.constituents;
+  var benchTickers = Object.keys(BT_BENCH).filter(function(k){ return BT_BENCH[k]; });
+  var allTickers = cons.map(function(c){ return c.ticker; }).concat(benchTickers);
+  var range = LOOKBACK_YEARS[BT_LOOKBACK] > 8 ? "max" : (LOOKBACK_YEARS[BT_LOOKBACK] >= 5 ? "10y" : "2y");
+
+  Promise.all(allTickers.map(function(t){ return getSeries(t, range); })).then(function(seriesList){
+    var cutoff = BT_LOOKBACK === "Max" ? "1900-01-01" : cutoffDate(LOOKBACK_YEARS[BT_LOOKBACK]);
+    var conSeries = seriesList.slice(0, cons.length).map(function(s){ return trimSeries(s, cutoff); });
+    var benchSeries = {};
+    benchTickers.forEach(function(t, i){ benchSeries[t] = trimSeries(seriesList[cons.length+i], cutoff); });
+
+    var baseDates = conSeries.reduce(function(longest, s){ return s.dates.length > longest.length ? s.dates : longest; }, []);
+    var totalWeight = cons.reduce(function(a,c){ return a+c.weight; }, 0);
+    var composite = baseDates.map(function(d, i){
+      var sum=0, wsum=0;
+      conSeries.forEach(function(s, idx){
+        var si = i - (baseDates.length - s.dates.length);
+        if (si < 0 || !s.closes.length) return;
+        var base = s.closes[0];
+        var val = s.closes[si] != null ? s.closes[si] : s.closes[s.closes.length-1];
+        sum += (val/base)*100 * cons[idx].weight; wsum += cons[idx].weight;
+      });
+      return wsum ? sum/wsum : null;
+    });
+
+    var datasets = [{ label:"GMR Nuclear Composite", data:composite, borderColor:"#4fd1c5", backgroundColor:"rgba(79,209,197,.1)", fill:true, pointRadius:0, borderWidth:2, tension:.1 }];
+    var colors = {SPY:"#f6ad55", URA:"#5b8cff", NLR:"#a78bfa"};
+    benchTickers.forEach(function(t){
+      var s = benchSeries[t];
+      var offset = baseDates.length - s.dates.length;
+      var rebased = baseDates.map(function(d, idx){
+        var si = idx - offset;
+        if (si < 0 || si >= s.closes.length) return null;
+        return (s.closes[si]/s.closes[0])*100;
+      });
+      datasets.push({ label:t, data:rebased, borderColor:colors[t]||"#e7edf7", pointRadius:0, borderWidth:1.5, tension:.1 });
+    });
+
+    if (BT_CHARTS.perf) BT_CHARTS.perf.destroy();
+    BT_CHARTS.perf = new Chart($("#bt-perf-canvas").getContext("2d"), {
+      type:"line", data:{ labels:baseDates, datasets:datasets },
+      options:{ maintainAspectRatio:false, scales:{ x:{ ticks:{color:"#93a2bb", maxTicksLimit:8}, grid:{color:"#1b2536"} }, y:{ ticks:{color:"#93a2bb"}, grid:{color:"#1b2536"} } }, plugins:{ legend:{ labels:{color:"#93a2bb", boxWidth:12} } } }
+    });
+
+    renderBacktestStats(composite, benchSeries, baseDates);
+    renderOverlayPanels(baseDates, composite);
+  }).catch(function(e){
+    console.error("GMR: backtest failed", e);
+    $("#bt-perf-canvas").parentElement.innerHTML = "<p class='muted small'>Could not run the backtest right now.</p>";
+  });
+}
+
+function trimSeries(s, cutoff){
+  var startIdx = s.dates.findIndex(function(d){ return d >= cutoff; });
+  if (startIdx <= 0) return s;
+  return { dates:s.dates.slice(startIdx), closes:s.closes.slice(startIdx), volumes:s.volumes.slice(startIdx), synthetic:s.synthetic };
+}
+
+function totalReturn(series){ return series.length>1 ? (series[series.length-1]/series[0]-1)*100 : null; }
+
+function renderBacktestStats(composite, benchSeries, baseDates){
+  var root = $("#bt-stats");
+  var validComposite = composite.filter(function(v){ return v!=null; });
+  var html = "<div class='section-title'>Total Return Over Period</div><div class='grid cols-4'>" +
+    "<div class='card'><h3>Composite</h3><div class='" + pctClass(totalReturn(validComposite)) + "'>" + fmtPct(totalReturn(validComposite)) + "</div></div>";
+  Object.keys(benchSeries).forEach(function(t){
+    var closes = benchSeries[t].closes;
+    html += "<div class='card'><h3>" + esc(t) + "</h3><div class='" + pctClass(totalReturn(closes)) + "'>" + fmtPct(totalReturn(closes)) + "</div></div>";
+  });
+  html += "</div>";
+  root.innerHTML = html;
+}
+
+function rollingDrawdown(series){
+  var out = []; var peak = -Infinity;
+  for (var i=0;i<series.length;i++){
+    if (series[i]==null){ out.push(null); continue; }
+    peak = Math.max(peak, series[i]);
+    out.push(((series[i]/peak)-1)*100);
+  }
+  return out;
+}
+function rollingSharpe(series, window){
+  window = window || 63;
+  var rets = [null];
+  for (var i=1;i<series.length;i++) rets.push(series[i]!=null && series[i-1]!=null ? series[i]/series[i-1]-1 : null);
+  var out = [];
+  for (i=0;i<series.length;i++){
+    if (i+1 < window){ out.push(null); continue; }
+    var win = rets.slice(i-window+1, i+1).filter(function(v){ return v!=null; });
+    if (win.length < window*0.8){ out.push(null); continue; }
+    var m = mean(win);
+    var variance = win.reduce(function(a,b){ return a+Math.pow(b-m,2); },0)/win.length;
+    var sd = Math.sqrt(variance);
+    out.push(sd>0 ? (m/sd)*Math.sqrt(252) : null);
+  }
+  return out;
+}
+
+function renderOverlayPanels(dates, composite){
+  var root = $("#bt-overlay-panels");
+  root.innerHTML = "";
+  if (BT_OVERLAYS.drawdown){
+    var card = document.createElement("div"); card.className = "card";
+    card.innerHTML = "<h3>Rolling Drawdown (Composite)</h3><div class='chart-wrap small'><canvas id='bt-dd-canvas'></canvas></div>";
+    root.appendChild(card);
+    var dd = rollingDrawdown(composite);
+    if (BT_CHARTS.dd) BT_CHARTS.dd.destroy();
+    BT_CHARTS.dd = new Chart($("#bt-dd-canvas").getContext("2d"), {
+      type:"line", data:{ labels:dates, datasets:[{ label:"Drawdown %", data:dd, borderColor:"#f56565", backgroundColor:"rgba(245,101,101,.15)", fill:true, pointRadius:0, borderWidth:1.3 }] },
+      options:{ maintainAspectRatio:false, scales:{ x:{ ticks:{color:"#93a2bb", maxTicksLimit:8}, grid:{color:"#1b2536"} }, y:{ ticks:{color:"#93a2bb"}, grid:{color:"#1b2536"} } }, plugins:{ legend:{ labels:{color:"#93a2bb", boxWidth:12} } } }
+    });
+  }
+  if (BT_OVERLAYS.sharpe){
+    var card2 = document.createElement("div"); card2.className = "card";
+    card2.innerHTML = "<h3>Rolling 63-Day Sharpe (Composite)</h3><div class='chart-wrap small'><canvas id='bt-sharpe-canvas'></canvas></div>";
+    root.appendChild(card2);
+    var sh = rollingSharpe(composite, 63);
+    if (BT_CHARTS.sharpe) BT_CHARTS.sharpe.destroy();
+    BT_CHARTS.sharpe = new Chart($("#bt-sharpe-canvas").getContext("2d"), {
+      type:"line", data:{ labels:dates, datasets:[{ label:"Rolling Sharpe", data:sh, borderColor:"#5b8cff", pointRadius:0, borderWidth:1.3 }] },
+      options:{ maintainAspectRatio:false, scales:{ x:{ ticks:{color:"#93a2bb", maxTicksLimit:8}, grid:{color:"#1b2536"} }, y:{ ticks:{color:"#93a2bb"}, grid:{color:"#1b2536"} } }, plugins:{ legend:{ labels:{color:"#93a2bb", boxWidth:12} } } }
+    });
+  }
 }
 
 try{ init(); }
