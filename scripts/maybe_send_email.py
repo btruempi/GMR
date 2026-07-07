@@ -42,16 +42,24 @@ def save_json(rel_path, data):
 
 
 def synthetic_series(ticker, days=260):
-    seed = sum(ord(c) for c in ticker)
-    price = 40 + (seed % 60)
-    import math
+    """Deterministic seeded random walk -- mirrors the JS syntheticSeries so
+    the offline fallback looks like a believable chart, not a sine wave."""
+    import random
+    seed = sum((i + 1) * ord(c) for i, c in enumerate(ticker))
+    rng = random.Random(seed)
+    price = 20 + (seed % 180)
+    drift = (rng.random() - 0.45) * 0.0012
+    vol = 0.012 + rng.random() * 0.02
     dates, closes, volumes = [], [], []
+    base_vol = 400000 + (seed % 9) * 300000
     for i in range(days):
-        rnd = math.sin(seed + i * 0.37) * 0.015 + math.cos(i * 0.11) * 0.008
-        price = max(1.0, price * (1 + rnd))
+        shock = (rng.random() + rng.random() + rng.random() - 1.5) * vol
+        if rng.random() > 0.97:
+            shock *= 3
+        price = max(1.0, price * (1 + drift + shock))
         dates.append(f"synthetic-{i}")
         closes.append(round(price, 2))
-        volumes.append(int(500000 + abs(math.sin(i)) * 2000000))
+        volumes.append(int(base_vol * (0.6 + rng.random() * 1.6)))
     return {"dates": dates, "closes": closes, "volumes": volumes, "synthetic": True}
 
 

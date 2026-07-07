@@ -127,6 +127,19 @@ label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px;margin
 .tag.filed{color:var(--blue);border-color:var(--blue)}
 .tag.imminent{color:var(--accent2);border-color:var(--accent2)}
 .tag.public{color:var(--up);border-color:var(--up)}
+.kpi{padding:16px 18px}
+.kpi .kpi-val{font-size:26px;font-weight:800;margin-top:2px;line-height:1.1}
+.kpi .kpi-sub{font-size:11.5px;margin-top:3px}
+.mkt-status{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--muted);
+  padding:5px 11px;border:1px solid var(--border);border-radius:99px;white-space:nowrap}
+.mkt-status .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.mkt-status.open .dot{background:var(--up);box-shadow:0 0 0 3px rgba(62,207,142,.18)}
+.mkt-status.closed .dot{background:var(--down)}
+.topbar-inner .mkt-status{margin-left:8px}
+footer.sitefoot{border-top:1px solid var(--border);margin-top:40px;padding:26px 20px;color:var(--muted);font-size:12.5px}
+footer.sitefoot .wrap{max-width:var(--maxw);margin:0 auto;display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+footer.sitefoot b{color:var(--text)}
+@media(max-width:720px){ nav.tabs button{padding:7px 9px;font-size:12.5px} .hero h1{font-size:26px} .topbar-inner{gap:10px} }
 """
 
 
@@ -143,10 +156,17 @@ HTML_TEMPLATE = r"""<!doctype html>
 <header class="topbar">
   <div class="topbar-inner">
     <div class="brand">Growth<span>Markets</span> Research</div>
+    <span class="mkt-status" id="mkt-status"><span class="dot"></span><span id="mkt-status-text">Market</span></span>
     <nav class="tabs" id="tabnav"></nav>
   </div>
 </header>
 <main id="main"></main>
+<footer class="sitefoot">
+  <div class="wrap">
+    <div><b>Growth Markets Research</b> &middot; watchlists, money-flow charting &amp; rule-based alerts. Runs $0/month on GitHub Pages + Actions.</div>
+    <div>Data: Yahoo Finance / Stooq (best-effort). Not investment advice.</div>
+  </div>
+</footer>
 <script>__CHARTJS__</script>
 <script>
 window.GMR_DATA = __SEED_DATA__;
@@ -543,19 +563,35 @@ function parseStooqCsv(csv){
   return out;
 }
 function syntheticSeries(ticker, days){
+  // Deterministic seeded random walk with mild drift + occasional volatility
+  // clusters, so the offline fallback looks like a believable price chart
+  // (not an obvious sine wave) and money-flow/RSI read naturally.
   days = days || 260;
-  var seed = 0; for (var i=0;i<ticker.length;i++) seed += ticker.charCodeAt(i);
-  var price = 40 + (seed % 60);
+  var seed = 0; for (var i=0;i<ticker.length;i++) seed += (i+1)*ticker.charCodeAt(i);
+  // mulberry32 PRNG
+  var a = (seed ^ 0x9e3779b9) >>> 0;
+  function rnd(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    var t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  var price = 20 + (seed % 180);
+  var drift = (rnd() - 0.45) * 0.0012;       // small per-ticker trend
+  var vol = 0.012 + rnd() * 0.02;            // base daily volatility
   var dates=[], closes=[], volumes=[];
   var d = new Date(); d.setDate(d.getDate()-days);
   for (i=0;i<days;i++){
     var day = d.getDay();
     if (day!==0 && day!==6){
-      var rnd = Math.sin(seed + i*0.37)*0.015 + Math.cos(i*0.11)*0.008;
-      price = Math.max(1, price*(1+rnd));
+      // gaussian-ish shock via sum of uniforms; occasional vol spike
+      var shock = (rnd()+rnd()+rnd()-1.5) * vol;
+      if (rnd() > 0.97) shock *= 3;
+      price = Math.max(1, price*(1 + drift + shock));
       dates.push(new Date(d).toISOString().slice(0,10));
       closes.push(Math.round(price*100)/100);
-      volumes.push(Math.round(500000 + Math.abs(Math.sin(i))*2000000));
+      var baseVol = 400000 + (seed % 9)*300000;
+      volumes.push(Math.round(baseVol * (0.6 + rnd()*1.6)));
     }
     d.setDate(d.getDate()+1);
   }
@@ -633,8 +669,30 @@ function showTab(key){
     panel.innerHTML = "<div class=card><h2>This tab hit a snag</h2><p class=muted>Check the browser console for details. Other tabs are unaffected.</p></div>";
   }
 }
+function updateMarketStatus(){
+  var el = document.getElementById("mkt-status");
+  var txt = document.getElementById("mkt-status-text");
+  if (!el || !txt) return;
+  // US regular session 9:30-16:00 ET. Convert now to ET via the UTC offset
+  // for America/New_York (handles DST via Intl, falling back to -4).
+  var now = new Date();
+  var etString = now.toLocaleString("en-US", {timeZone:"America/New_York", hour12:false, weekday:"short", hour:"2-digit", minute:"2-digit"});
+  var parts = etString.match(/(\w{3}).*?(\d{2}):(\d{2})/);
+  var open = false;
+  if (parts){
+    var day = parts[1], hh = parseInt(parts[2],10), mm = parseInt(parts[3],10);
+    var isWeekday = ["Mon","Tue","Wed","Thu","Fri"].indexOf(day) !== -1;
+    var mins = hh*60 + mm;
+    open = isWeekday && mins >= (9*60+30) && mins < (16*60);
+  }
+  el.className = "mkt-status " + (open ? "open" : "closed");
+  txt.textContent = open ? "Market open" : "Market closed";
+}
+
 function init(){
   renderNav();
+  updateMarketStatus();
+  setInterval(updateMarketStatus, 60000);
   var initial = (location.hash||"").replace("#","");
   var valid = TABS.some(function(t){ return t.key===initial; });
   showTab(valid ? initial : "dashboard");
@@ -669,6 +727,12 @@ RENDERERS.dashboard = function(root){
         "<button class='btn ghost' id='cta-optimizer'>Build a portfolio</button>" +
       "</div>" +
     "</div>" +
+    "<div class='grid cols-4' id='dash-kpis'>" +
+      "<div class='card kpi'><h3>Index Level</h3><div class='kpi-val' id='kpi-level'>--</div><div class='kpi-sub muted'>rebased to 100</div></div>" +
+      "<div class='card kpi'><h3>Index Day Change</h3><div class='kpi-val' id='kpi-change'>--</div><div class='kpi-sub muted' id='kpi-change-sub'>vs prior close</div></div>" +
+      "<div class='card kpi'><h3>Money-Flow Breadth</h3><div class='kpi-val' id='kpi-breadth'>--</div><div class='kpi-sub muted'>accumulating / total</div></div>" +
+      "<div class='card kpi'><h3>Top Mover Today</h3><div class='kpi-val' id='kpi-topmover'>--</div><div class='kpi-sub muted' id='kpi-topmover-sub'>&nbsp;</div></div>" +
+    "</div>" +
     "<div class='grid cols-2'>" +
       "<div class='card'><h3>Featured Index -- Nuclear</h3><div class='chart-wrap'><canvas id='dash-index-chart'></canvas></div></div>" +
       "<div class='card'><h3>Sector Weights</h3><div class='chart-wrap'><canvas id='dash-sector-donut'></canvas></div></div>" +
@@ -685,7 +749,51 @@ RENDERERS.dashboard = function(root){
   renderWatchlistSummary($("#dash-watchlist-summary"));
   renderSectorDonut($("#dash-sector-donut"));
   renderIndexChart($("#dash-index-chart"));
+  renderDashboardKPIs();
 };
+
+function renderDashboardKPIs(){
+  var cons = STATE.constituents || [];
+  if (!cons.length) return;
+  Promise.all(cons.map(function(c){ return getSeries(c.ticker).then(function(s){ return {con:c, series:s}; }); })).then(function(rows){
+    var totalWeight = cons.reduce(function(a,c){ return a+c.weight; }, 0);
+    var lenRef = rows[0].series.closes.length;
+    // weighted composite level + day change
+    var levelNow = 0, levelPrev = 0;
+    rows.forEach(function(r){
+      var closes = r.series.closes, base = closes[0];
+      if (!base) return;
+      var now = closes[closes.length-1], prev = closes.length>1 ? closes[closes.length-2] : now;
+      levelNow += (now/base)*100 * r.con.weight;
+      levelPrev += (prev/base)*100 * r.con.weight;
+    });
+    levelNow /= totalWeight; levelPrev /= totalWeight;
+    var dayChg = levelPrev ? (levelNow/levelPrev - 1)*100 : 0;
+
+    // breadth: how many constituents are accumulating on money flow
+    var accum = 0;
+    var movers = [];
+    rows.forEach(function(r){
+      var s = r.series;
+      var cmf = IND.cmf(s.dates, s.closes, s.volumes, 21);
+      var status = IND.moneyFlowStatus(cmf, 21);
+      if (status.cls === "up") accum++;
+      var closes = s.closes;
+      var chg = closes.length>1 ? (closes[closes.length-1]/closes[closes.length-2]-1)*100 : 0;
+      movers.push({ticker:r.con.ticker, chg:chg});
+    });
+    movers.sort(function(a,b){ return Math.abs(b.chg)-Math.abs(a.chg); });
+    var top = movers[0];
+
+    var elLevel = $("#kpi-level"); if (elLevel) elLevel.textContent = fmtNum(levelNow, 1);
+    var elChg = $("#kpi-change");
+    if (elChg){ elChg.textContent = fmtPct(dayChg); elChg.className = "kpi-val " + pctClass(dayChg); }
+    var elBreadth = $("#kpi-breadth"); if (elBreadth) elBreadth.textContent = accum + " / " + rows.length;
+    var elTop = $("#kpi-topmover");
+    if (elTop && top){ elTop.textContent = top.ticker; elTop.className = "kpi-val " + pctClass(top.chg); }
+    var elTopSub = $("#kpi-topmover-sub"); if (elTopSub && top) elTopSub.textContent = fmtPct(top.chg) + " today";
+  }).catch(function(e){ console.error("GMR: dashboard KPIs failed", e); });
+}
 
 function renderWatchlistSummary(root){
   var lists = STATE.watchlists.lists || {};
