@@ -1,0 +1,46 @@
+name: GMR alerts + email digest
+
+on:
+  schedule:
+    # Alert rule check -- every 15 minutes during US market hours (13:00-20:59 UTC, Mon-Fri)
+    - cron: "*/15 13-20 * * 1-5"
+    # Daily digest gate -- script decides whether today matches the configured cadence
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+    inputs:
+      test:
+        description: "Send a synthetic test alert, bypassing all rule conditions"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Evaluate alerts / send digest
+        env:
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NRI_TEST_MODE: ${{ inputs.test && '1' || '0' }}
+          NRI_TRIGGER_CRON: ${{ github.event.schedule }}
+        run: python3 scripts/maybe_send_email.py
+
+      - name: Commit updated alert dedup ledger
+        run: |
+          if ! git diff --quiet -- data/alerts_state.json; then
+            git config user.name "gmr-bot"
+            git config user.email "gmr-bot@users.noreply.github.com"
+            git add data/alerts_state.json
+            git commit -m "GMR: update alerts_state.json [skip ci]"
+            git push
+          else
+            echo "No dedup ledger changes to commit."
+          fi
