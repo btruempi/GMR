@@ -1,0 +1,736 @@
+#!/usr/bin/env python3
+"""
+Builds index.html (and a legacy-named copy, Nuclear-Renaissance-Index.html)
+for Growth Markets Research from data/*.json + vendor/chart.umd.min.js.
+
+Everything ships as one static HTML file: Chart.js is inlined so the page
+works offline, and the seed data is inlined as a JS constant so the first
+paint never depends on a network call. Live prices are fetched client-side
+at load time via the CORS proxy chain in APP_JS.
+
+Run: python3 build_static_site.py
+"""
+import json
+import os
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def load_json(name):
+    with open(os.path.join(ROOT, "data", name), encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_text(rel_path):
+    with open(os.path.join(ROOT, rel_path), encoding="utf-8") as f:
+        return f.read()
+
+
+def build_seed_data():
+    return {
+        "constituents": load_json("constituents.json"),
+        "catalysts": load_json("catalysts.json"),
+        "preIpo": load_json("pre_ipo.json"),
+        "profile": load_json("profile.json"),
+        "emailSettings": load_json("email_settings.json"),
+        "alerts": load_json("alerts.json"),
+        "watchlists": load_json("watchlists.json"),
+        "presets": load_json("presets.json"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# CSS
+# ---------------------------------------------------------------------------
+CSS = r"""
+:root{
+  --bg:#0b0f14; --bg2:#111826; --panel:#151d2b; --panel2:#1b2536;
+  --border:#26324a; --text:#e7edf7; --muted:#93a2bb; --accent:#4fd1c5;
+  --accent2:#f6ad55; --up:#3ecf8e; --down:#f56565; --blue:#5b8cff;
+  --radius:12px; --maxw:1280px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+a{color:var(--accent)}
+button, select, input{font-family:inherit}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
+header.topbar{position:sticky;top:0;z-index:50;background:rgba(11,15,20,.92);
+  backdrop-filter:blur(6px);border-bottom:1px solid var(--border)}
+.topbar-inner{display:flex;align-items:center;gap:20px;padding:14px 20px;max-width:var(--maxw);margin:0 auto}
+.brand{font-weight:800;font-size:18px;letter-spacing:.2px}
+.brand span{color:var(--accent)}
+nav.tabs{display:flex;flex-wrap:wrap;gap:4px;margin-left:auto}
+nav.tabs button{background:none;border:1px solid transparent;color:var(--muted);
+  padding:8px 12px;border-radius:8px;cursor:pointer;font-size:13.5px;font-weight:600}
+nav.tabs button:hover{color:var(--text);border-color:var(--border)}
+nav.tabs button.active{background:var(--panel2);color:var(--text);border-color:var(--accent)}
+main{max-width:var(--maxw);margin:0 auto;padding:24px 20px 80px}
+.tabpanel{display:none}
+.tabpanel.active{display:block}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:18px}
+.card h2{margin:0 0 4px;font-size:18px}
+.card h3{margin:0 0 10px;font-size:14px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.grid{display:grid;gap:18px}
+.grid.cols-2{grid-template-columns:1fr 1fr}
+.grid.cols-3{grid-template-columns:1fr 1fr 1fr}
+.grid.cols-4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:900px){.grid.cols-2,.grid.cols-3,.grid.cols-4{grid-template-columns:1fr}}
+.hero{padding:40px 20px;text-align:left}
+.hero h1{font-size:34px;margin:0 0 10px;line-height:1.15}
+.hero p{color:var(--muted);font-size:16px;max-width:620px}
+.cta-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+.btn{background:var(--accent);color:#04211d;border:none;padding:10px 16px;border-radius:8px;
+  font-weight:700;cursor:pointer;font-size:13.5px}
+.btn.secondary{background:var(--panel2);color:var(--text);border:1px solid var(--border)}
+.btn.ghost{background:none;color:var(--accent);border:1px solid var(--border)}
+.btn.small{padding:6px 10px;font-size:12.5px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.pill{display:inline-block;padding:3px 9px;border-radius:99px;font-size:11.5px;font-weight:700;
+  background:var(--panel2);color:var(--muted);border:1px solid var(--border)}
+.pill.up{color:var(--up);border-color:var(--up)}
+.pill.down{color:var(--down);border-color:var(--down)}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)}
+th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+tr.clickable{cursor:pointer}
+tr.clickable:hover{background:var(--panel2)}
+.up{color:var(--up)}
+.down{color:var(--down)}
+.muted{color:var(--muted)}
+input[type=text], input[type=number], input[type=email], input[type=date], select, textarea{
+  background:var(--bg2);border:1px solid var(--border);color:var(--text);
+  padding:8px 10px;border-radius:8px;font-size:13.5px;width:100%}
+label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px;margin-top:10px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--border);
+  border-radius:99px;padding:5px 11px;font-size:12.5px;cursor:pointer;color:var(--text)}
+.chip:hover{border-color:var(--accent)}
+.chip.active{background:var(--accent);color:#04211d;border-color:var(--accent)}
+.chip .x{opacity:.6;margin-left:2px}
+.chart-wrap{position:relative;height:320px}
+.chart-wrap.small{height:160px}
+.badge-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.section-title{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:22px 0 10px}
+.footer-note{color:var(--muted);font-size:12.5px;margin-top:8px}
+.status-table{max-width:640px}
+.status-table td:first-child{color:var(--muted)}
+.diag-ok{color:var(--up);font-weight:700}
+.diag-bad{color:var(--down);font-weight:700}
+.flex-between{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.small{font-size:12.5px}
+.hidden{display:none !important}
+::-webkit-scrollbar{height:8px;width:8px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px}
+.tag{font-size:11px;padding:2px 7px;border-radius:6px;background:var(--panel2);color:var(--muted);border:1px solid var(--border)}
+.tag.private{color:var(--muted)}
+.tag.filed{color:var(--blue);border-color:var(--blue)}
+.tag.imminent{color:var(--accent2);border-color:var(--accent2)}
+.tag.public{color:var(--up);border-color:var(--up)}
+"""
+
+
+HTML_TEMPLATE = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Growth Markets Research</title>
+<meta name="description" content="Growth Markets Research: watchlists, technical + money-flow indicators, and rule-based alerts for growth sectors.">
+<style>__CSS__</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">Growth<span>Markets</span> Research</div>
+    <nav class="tabs" id="tabnav"></nav>
+  </div>
+</header>
+<main id="main"></main>
+<script>__CHARTJS__</script>
+<script>
+window.GMR_DATA = __SEED_DATA__;
+</script>
+<script>__APP_JS__</script>
+</body>
+</html>
+"""
+
+
+def build():
+    css = CSS
+    chartjs = load_text("vendor/chart.umd.min.js")
+    seed = build_seed_data()
+    # APP_JS is assembled from the JS_* raw-string parts defined below this
+    # function (gotcha #1: keep everything a single raw string / concat of
+    # raw strings so a stray Python escape can't corrupt the JS output).
+    app_js = APP_JS
+
+    html = (
+        HTML_TEMPLATE
+        .replace("__CSS__", css)
+        .replace("__CHARTJS__", chartjs)
+        .replace("__SEED_DATA__", json.dumps(seed))
+        .replace("__APP_JS__", app_js)
+    )
+
+    with open(os.path.join(ROOT, "index.html"), "w", encoding="utf-8") as f:
+        f.write(html)
+    # legacy filename kept for backward compatibility with old bookmarks/links
+    with open(os.path.join(ROOT, "Nuclear-Renaissance-Index.html"), "w", encoding="utf-8") as f:
+        f.write(html)
+    with open(os.path.join(ROOT, ".nojekyll"), "w", encoding="utf-8") as f:
+        f.write("")
+
+    size_kb = len(html.encode("utf-8")) / 1024
+    print(f"Built index.html ({size_kb:.0f} KB) + Nuclear-Renaissance-Index.html + .nojekyll")
+
+
+# ---------------------------------------------------------------------------
+# APP_JS — assembled from raw-string parts. Keeping the JS as Python raw
+# strings (gotcha #1) means backslashes are literal; never write \' inside a
+# JS string literal here — use double quotes instead.
+# ---------------------------------------------------------------------------
+
+JS_OPEN = r"""
+(function(){
+"use strict";
+"""
+
+JS_CORE = r"""
+// ---- tiny DOM + format helpers ----------------------------------------
+function $(sel, root){ return (root||document).querySelector(sel); }
+function $all(sel, root){ return Array.prototype.slice.call((root||document).querySelectorAll(sel)); }
+function esc(s){
+  return String(s == null ? "" : s).replace(/[&<>"]/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];
+  });
+}
+function fmtPrice(v){ return (v == null || isNaN(v)) ? "--" : "$" + Number(v).toFixed(2); }
+function fmtNum(v, d){ return (v == null || isNaN(v)) ? "--" : Number(v).toFixed(d == null ? 2 : d); }
+function fmtPct(v, d){ return (v == null || isNaN(v)) ? "--" : (v >= 0 ? "+" : "") + Number(v).toFixed(d == null ? 2 : d) + "%"; }
+function pctClass(v){ return (v == null || isNaN(v)) ? "" : (v >= 0 ? "up" : "down"); }
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+function uid(){ return Math.random().toString(36).slice(2, 10); }
+
+// ---- localStorage helpers (namespaced, never throw) --------------------
+var LS_PREFIX = "gmr_";
+function lsGet(key, fallback){
+  try{
+    var raw = localStorage.getItem(LS_PREFIX + key);
+    return raw == null ? fallback : JSON.parse(raw);
+  }catch(e){ return fallback; }
+}
+function lsSet(key, val){
+  try{ localStorage.setItem(LS_PREFIX + key, JSON.stringify(val)); }catch(e){ /* quota or private mode */ }
+}
+
+// ---- global app state ---------------------------------------------------
+var SEED = window.GMR_DATA || {};
+var STATE = {
+  tab: "dashboard",
+  watchlists: lsGet("watchlists", SEED.watchlists),
+  profile: lsGet("profile", SEED.profile),
+  alerts: lsGet("alerts", SEED.alerts),
+  emailSettings: lsGet("emailSettings", SEED.emailSettings),
+  presets: SEED.presets || [],
+  constituents: SEED.constituents || [],
+  catalysts: SEED.catalysts || [],
+  preIpo: SEED.preIpo || [],
+  seriesCache: {},
+  githubToken: lsGet("githubToken", ""),
+  githubRepo: lsGet("githubRepo", "")
+};
+function saveWatchlists(){ lsSet("watchlists", STATE.watchlists); }
+function saveProfile(){ lsSet("profile", STATE.profile); }
+function saveAlerts(){ lsSet("alerts", STATE.alerts); }
+function saveEmailSettings(){ lsSet("emailSettings", STATE.emailSettings); }
+
+// ---- indicator math (mirrors scripts/indicators.py -- keep in sync) -----
+var IND = {};
+IND.sma = function(dates, closes, n){
+  var out = [];
+  for (var i=0;i<closes.length;i++){
+    var p = null;
+    if (i+1 >= n){
+      var sum=0; for(var j=i-n+1;j<=i;j++) sum+=closes[j];
+      p = sum/n;
+    }
+    out.push({d:dates[i], p:p});
+  }
+  return out;
+};
+IND.ema = function(dates, closes, n){
+  var out = []; var k = 2/(n+1); var prev = null;
+  for (var i=0;i<closes.length;i++){
+    var p = null;
+    if (prev == null){
+      if (i+1 === n){
+        var sum=0; for(var j=i-n+1;j<=i;j++) sum+=closes[j];
+        prev = sum/n; p = prev;
+      }
+    } else {
+      prev = closes[i]*k + prev*(1-k); p = prev;
+    }
+    out.push({d:dates[i], p:p});
+  }
+  return out;
+};
+IND.rsi = function(dates, closes, n){
+  n = n || 14;
+  var out = [];
+  for (var i=0;i<closes.length;i++) out.push({d:dates[i], p:null});
+  if (closes.length < n+1) return out;
+  var gains=0, losses=0, i2;
+  for (i2=1;i2<=n;i2++){
+    var ch = closes[i2]-closes[i2-1];
+    gains += Math.max(ch,0); losses += Math.max(-ch,0);
+  }
+  var avgGain = gains/n, avgLoss = losses/n;
+  out[n].p = avgLoss===0 ? 100 : 100 - (100/(1+avgGain/avgLoss));
+  for (i2=n+1;i2<closes.length;i2++){
+    var change = closes[i2]-closes[i2-1];
+    var gain = Math.max(change,0), loss = Math.max(-change,0);
+    avgGain = (avgGain*(n-1)+gain)/n;
+    avgLoss = (avgLoss*(n-1)+loss)/n;
+    out[i2].p = avgLoss===0 ? 100 : 100 - (100/(1+avgGain/avgLoss));
+  }
+  return out;
+};
+IND.bollinger = function(dates, closes, n, k){
+  n = n||20; k = k||2;
+  var mid = IND.sma(dates, closes, n);
+  var upper=[], lower=[];
+  for (var i=0;i<closes.length;i++){
+    if (mid[i].p != null){
+      var m = mid[i].p, variance=0;
+      for (var j=i-n+1;j<=i;j++) variance += Math.pow(closes[j]-m,2);
+      variance/=n;
+      var sd = Math.sqrt(variance);
+      upper.push({d:dates[i], p:m+k*sd});
+      lower.push({d:dates[i], p:m-k*sd});
+    } else {
+      upper.push({d:dates[i], p:null}); lower.push({d:dates[i], p:null});
+    }
+  }
+  return {mid:mid, upper:upper, lower:lower};
+};
+IND.macd = function(dates, closes, fast, slow, signal){
+  fast=fast||12; slow=slow||26; signal=signal||9;
+  var emaFast = IND.ema(dates, closes, fast);
+  var emaSlow = IND.ema(dates, closes, slow);
+  var line = [];
+  for (var i=0;i<closes.length;i++){
+    var p = (emaFast[i].p!=null && emaSlow[i].p!=null) ? emaFast[i].p-emaSlow[i].p : null;
+    line.push({d:dates[i], p:p});
+  }
+  var first = -1;
+  for (i=0;i<line.length;i++){ if (line[i].p!=null){ first=i; break; } }
+  var signalLine = line.map(function(x){ return {d:x.d, p:null}; });
+  var hist = line.map(function(x){ return {d:x.d, p:null}; });
+  if (first >= 0){
+    var subDates = dates.slice(first), subCloses = line.slice(first).map(function(x){return x.p;});
+    var subSignal = IND.ema(subDates, subCloses, signal);
+    for (var j2=0;j2<subSignal.length;j2++){
+      if (subSignal[j2].p!=null){
+        signalLine[first+j2].p = subSignal[j2].p;
+        hist[first+j2].p = line[first+j2].p - subSignal[j2].p;
+      }
+    }
+  }
+  return {line:line, signal:signalLine, hist:hist};
+};
+IND.vwap = function(dates, closes, volumes){
+  var out=[]; var cumPV=0, cumV=0;
+  for (var i=0;i<closes.length;i++){
+    cumPV += closes[i]*(volumes[i]||0); cumV += (volumes[i]||0);
+    out.push({d:dates[i], p: cumV ? cumPV/cumV : null});
+  }
+  return out;
+};
+IND.obv = function(dates, closes, volumes){
+  var out=[{d:dates[0], p:0}];
+  for (var i=1;i<closes.length;i++){
+    var prev = out[i-1].p;
+    if (closes[i] > closes[i-1]) out.push({d:dates[i], p: prev + (volumes[i]||0)});
+    else if (closes[i] < closes[i-1]) out.push({d:dates[i], p: prev - (volumes[i]||0)});
+    else out.push({d:dates[i], p: prev});
+  }
+  return out;
+};
+IND._atrProxy = function(closes, n){
+  n = n||14;
+  var changes = [null];
+  for (var i=1;i<closes.length;i++) changes.push(Math.abs(closes[i]-closes[i-1]));
+  var out = [];
+  for (i=0;i<closes.length;i++){
+    var lo = Math.max(0, i-n+1);
+    var window = changes.slice(lo, i+1).filter(function(c){ return c!=null; });
+    out.push(window.length>=n ? window.reduce(function(a,b){return a+b;},0)/window.length : null);
+  }
+  return out;
+};
+IND._mfm = function(close, prevClose, atr){
+  if (!atr || atr<=0 || prevClose==null) return null;
+  var m = 2*(close-prevClose)/atr;
+  return Math.max(-1, Math.min(1, m));
+};
+IND.cmf = function(dates, closes, volumes, n){
+  n = n||21;
+  var atr = IND._atrProxy(closes, 14);
+  var mfv = closes.map(function(){ return null; });
+  for (var i=1;i<closes.length;i++){
+    var m = IND._mfm(closes[i], closes[i-1], atr[i]);
+    if (m!=null) mfv[i] = m*(volumes[i]||0);
+  }
+  var out=[];
+  for (i=0;i<closes.length;i++){
+    var lo = Math.max(0, i-n+1);
+    var wv=[], wvol=[];
+    for (var j=lo;j<=i;j++){ if (mfv[j]!=null){ wv.push(mfv[j]); wvol.push(volumes[j]||0); } }
+    var volSum = wvol.reduce(function(a,b){return a+b;},0);
+    out.push({d:dates[i], p: (wv.length>=n && volSum>0) ? wv.reduce(function(a,b){return a+b;},0)/volSum : null});
+  }
+  return out;
+};
+IND.mfi = function(dates, closes, volumes, n){
+  n = n||14;
+  var rawMf = closes.map(function(c,i){ return c*(volumes[i]||0); });
+  var pos = closes.map(function(){return 0;}), neg = closes.map(function(){return 0;});
+  for (var i=1;i<closes.length;i++){
+    if (closes[i]>closes[i-1]) pos[i]=rawMf[i];
+    else if (closes[i]<closes[i-1]) neg[i]=rawMf[i];
+  }
+  var out=[];
+  for (i=0;i<closes.length;i++){
+    var p = null;
+    if (i+1 >= n+1){
+      var posSum=0, negSum=0;
+      for (var j=i-n+1;j<=i;j++){ posSum+=pos[j]; negSum+=neg[j]; }
+      p = negSum===0 ? 100 : 100 - (100/(1+posSum/negSum));
+    }
+    out.push({d:dates[i], p:p});
+  }
+  return out;
+};
+IND.adLine = function(dates, closes, volumes){
+  var atr = IND._atrProxy(closes, 14);
+  var out=[{d:dates[0], p:0}]; var cum=0;
+  for (var i=1;i<closes.length;i++){
+    var m = IND._mfm(closes[i], closes[i-1], atr[i]);
+    if (m!=null) cum += m*(volumes[i]||0);
+    out.push({d:dates[i], p:cum});
+  }
+  return out;
+};
+IND.moneyFlowStatus = function(cmfSeries, lookback){
+  lookback = lookback || 21;
+  var vals = cmfSeries.slice(-lookback).map(function(x){return x.p;}).filter(function(v){return v!=null;});
+  if (!vals.length) return {label:"Neutral", cmf:0, cls:""};
+  var avg = vals.reduce(function(a,b){return a+b;},0)/vals.length;
+  if (avg >= 0.05) return {label:"Accumulating", cmf:avg, cls:"up"};
+  if (avg <= -0.05) return {label:"Distributing", cmf:avg, cls:"down"};
+  return {label:"Neutral", cmf:avg, cls:""};
+};
+IND.obvNewHigh = function(obvSeries, n){
+  var window = obvSeries.slice(-n).map(function(x){return x.p;}).filter(function(v){return v!=null;});
+  if (window.length < 2) return false;
+  return window[window.length-1] >= Math.max.apply(null, window);
+};
+"""
+
+JS_PROXY = r"""
+// ---- CORS proxy chain ----------------------------------------------------
+// Order matters: cheap/fast proxies first. Health state persists in
+// localStorage so a bad proxy this session stays deprioritized next time.
+var PROXIES = [
+  {name:"corsproxy",      build:function(u){ return "https://corsproxy.io/?url=" + encodeURIComponent(u); }},
+  {name:"allorigins-raw", build:function(u){ return "https://api.allorigins.win/raw?url=" + encodeURIComponent(u); }},
+  {name:"allorigins-get", build:function(u){ return "https://api.allorigins.win/get?url=" + encodeURIComponent(u); }, wrapped:true},
+  {name:"codetabs",       build:function(u){ return "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u); }},
+  {name:"thingproxy",     build:function(u){ return "https://thingproxy.freeboard.io/fetch/" + u; }},
+  {name:"corslol",        build:function(u){ return "https://api.cors.lol/?url=" + encodeURIComponent(u); }},
+  {name:"jina",           build:function(u){ return "https://r.jina.ai/" + u; }}
+];
+function proxyHealth(){ return lsGet("proxyHealth", {}); }
+function saveProxyHealth(h){ lsSet("proxyHealth", h); }
+function orderedProxies(){
+  var health = proxyHealth();
+  var lastGood = lsGet("lastGoodProxy", null);
+  var list = PROXIES.slice();
+  list.sort(function(a,b){
+    if (a.name === lastGood) return -1;
+    if (b.name === lastGood) return 1;
+    var fa = (health[a.name]||{}).fails||0, fb = (health[b.name]||{}).fails||0;
+    return fa - fb;
+  });
+  return list.filter(function(p){ return (health[p.name]||{}).fails < 5; });
+}
+function markProxyResult(name, ok){
+  var health = proxyHealth();
+  health[name] = health[name] || {fails:0};
+  if (ok){ health[name].fails = 0; lsSet("lastGoodProxy", name); }
+  else { health[name].fails = (health[name].fails||0) + 1; }
+  saveProxyHealth(health);
+}
+function fetchViaProxies(targetUrl, timeoutMs){
+  timeoutMs = timeoutMs || 9000;
+  var list = orderedProxies();
+  function tryOne(idx){
+    if (idx >= list.length) return Promise.reject(new Error("all proxies exhausted"));
+    var proxy = list[idx];
+    var ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function(){ ctrl.abort(); }, timeoutMs) : null;
+    return fetch(proxy.build(targetUrl), ctrl ? {signal: ctrl.signal} : {})
+      .then(function(res){
+        if (timer) clearTimeout(timer);
+        if (!res.ok) throw new Error("http " + res.status);
+        return res.text().then(function(txt){
+          if (!txt || !txt.length) throw new Error("empty body");
+          if (proxy.wrapped){
+            try{ txt = JSON.parse(txt).contents || ""; }catch(e){ throw new Error("bad wrapped body"); }
+            if (!txt) throw new Error("empty wrapped body");
+          }
+          markProxyResult(proxy.name, true);
+          return txt;
+        });
+      })
+      .catch(function(err){
+        markProxyResult(proxy.name, false);
+        return tryOne(idx+1);
+      });
+  }
+  return tryOne(0);
+}
+
+// ---- price series fetch: Yahoo first, Stooq fallback ---------------------
+function parseYahooChart(json){
+  var res = JSON.parse(json).chart.result[0];
+  var ts = res.timestamp || [];
+  var closes = res.indicators.quote[0].close || [];
+  var volumes = res.indicators.quote[0].volume || [];
+  var dates = ts.map(function(t){ return new Date(t*1000).toISOString().slice(0,10); });
+  var out = {dates:[], closes:[], volumes:[]};
+  for (var i=0;i<dates.length;i++){
+    if (closes[i]!=null){ out.dates.push(dates[i]); out.closes.push(closes[i]); out.volumes.push(volumes[i]||0); }
+  }
+  return out;
+}
+function parseStooqCsv(csv){
+  var lines = csv.trim().split("\n").slice(1);
+  var out = {dates:[], closes:[], volumes:[]};
+  lines.forEach(function(line){
+    var parts = line.split(",");
+    if (parts.length < 6) return;
+    var close = parseFloat(parts[4]), vol = parseFloat(parts[5]);
+    if (isNaN(close)) return;
+    out.dates.push(parts[0]); out.closes.push(close); out.volumes.push(isNaN(vol)?0:vol);
+  });
+  return out;
+}
+function syntheticSeries(ticker){
+  var seed = 0; for (var i=0;i<ticker.length;i++) seed += ticker.charCodeAt(i);
+  var price = 40 + (seed % 60);
+  var dates=[], closes=[], volumes=[];
+  var d = new Date(); d.setDate(d.getDate()-260);
+  for (i=0;i<260;i++){
+    var day = d.getDay();
+    if (day!==0 && day!==6){
+      var rnd = Math.sin(seed + i*0.37)*0.015 + Math.cos(i*0.11)*0.008;
+      price = Math.max(1, price*(1+rnd));
+      dates.push(new Date(d).toISOString().slice(0,10));
+      closes.push(Math.round(price*100)/100);
+      volumes.push(Math.round(500000 + Math.abs(Math.sin(i))*2000000));
+    }
+    d.setDate(d.getDate()+1);
+  }
+  return {dates:dates, closes:closes, volumes:volumes, synthetic:true};
+}
+function getSeries(ticker){
+  ticker = ticker.toUpperCase();
+  if (STATE.seriesCache[ticker]) return Promise.resolve(STATE.seriesCache[ticker]);
+  var yahooUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(ticker) + "?range=2y&interval=1d";
+  var stooqUrl = "https://stooq.com/q/d/l/?s=" + encodeURIComponent(ticker.toLowerCase()) + ".us&i=d";
+  return fetchViaProxies(yahooUrl)
+    .then(function(txt){ return parseYahooChart(txt); })
+    .catch(function(){
+      return fetchViaProxies(stooqUrl).then(function(txt){ return parseStooqCsv(txt); });
+    })
+    .then(function(series){
+      if (!series.closes || series.closes.length < 5) throw new Error("no data");
+      STATE.seriesCache[ticker] = series;
+      return series;
+    })
+    .catch(function(err){
+      console.warn("GMR: live fetch failed for " + ticker + ", using synthetic series.", err);
+      var s = syntheticSeries(ticker);
+      STATE.seriesCache[ticker] = s;
+      return s;
+    });
+}
+"""
+
+JS_ROUTER = r"""
+// ---- tabs / router ---------------------------------------------------
+var TABS = [
+  {key:"dashboard",   label:"Dashboard"},
+  {key:"watchlists",  label:"Watchlists"},
+  {key:"companies",   label:"Companies"},
+  {key:"optimizer",   label:"Optimizer"},
+  {key:"backtest",    label:"Backtest"},
+  {key:"updates",     label:"Updates"},
+  {key:"preipo",      label:"Pre-IPO"},
+  {key:"profile",     label:"Profile"},
+  {key:"alerts",      label:"Alerts"},
+  {key:"methodology", label:"Methodology"}
+];
+var RENDERERS = {};
+function renderNav(){
+  var nav = $("#tabnav");
+  nav.innerHTML = "";
+  TABS.forEach(function(t){
+    var b = document.createElement("button");
+    b.textContent = t.label;
+    b.dataset.tab = t.key;
+    if (t.key === STATE.tab) b.className = "active";
+    b.addEventListener("click", function(){ showTab(t.key); });
+    nav.appendChild(b);
+  });
+}
+function showTab(key){
+  STATE.tab = key;
+  location.hash = key;
+  $all("#tabnav button").forEach(function(b){ b.className = (b.dataset.tab===key) ? "active" : ""; });
+  var main = $("#main");
+  main.innerHTML = "";
+  var panel = document.createElement("div");
+  panel.className = "tabpanel active";
+  main.appendChild(panel);
+  try{
+    var renderer = RENDERERS[key];
+    if (renderer) renderer(panel);
+    else panel.innerHTML = "<div class=card><h2>" + esc(key) + "</h2><p class=muted>Coming online shortly.</p></div>";
+  }catch(e){
+    console.error("GMR: render failed for tab " + key, e);
+    panel.innerHTML = "<div class=card><h2>This tab hit a snag</h2><p class=muted>Check the browser console for details. Other tabs are unaffected.</p></div>";
+  }
+}
+function init(){
+  renderNav();
+  var initial = (location.hash||"").replace("#","");
+  var valid = TABS.some(function(t){ return t.key===initial; });
+  showTab(valid ? initial : "dashboard");
+  window.addEventListener("hashchange", function(){
+    var k = location.hash.replace("#","");
+    if (TABS.some(function(t){ return t.key===k; })) showTab(k);
+  });
+}
+"""
+
+JS_CLOSE = r"""
+try{ init(); }
+catch(e){
+  console.error("GMR: fatal init error", e);
+  document.getElementById("main").innerHTML =
+    "<div class='card'><h2>Something went wrong loading Growth Markets Research</h2>" +
+    "<p class='muted'>Open the browser console for details, then reload.</p></div>";
+}
+})();
+"""
+
+JS_DASHBOARD = r"""
+// ---- Dashboard tab -------------------------------------------------------
+RENDERERS.dashboard = function(root){
+  root.innerHTML =
+    "<div class='hero card'>" +
+      "<h1>Spot growth before it moves.</h1>" +
+      "<p>Track named watchlists across 30+ sectors, layer on technical and money-flow indicators, and fire rule-based alerts during market hours -- all for free.</p>" +
+      "<div class='cta-row'>" +
+        "<button class='btn' id='cta-watchlists'>Open Watchlists</button>" +
+        "<button class='btn secondary' id='cta-alerts'>Set up an alert</button>" +
+        "<button class='btn ghost' id='cta-optimizer'>Build a portfolio</button>" +
+      "</div>" +
+    "</div>" +
+    "<div class='grid cols-2'>" +
+      "<div class='card'><h3>Featured Index -- Nuclear</h3><div class='chart-wrap'><canvas id='dash-index-chart'></canvas></div></div>" +
+      "<div class='card'><h3>Sector Weights</h3><div class='chart-wrap'><canvas id='dash-sector-donut'></canvas></div></div>" +
+    "</div>" +
+    "<div class='card'>" +
+      "<h3>Your Watchlists</h3>" +
+      "<div id='dash-watchlist-summary'></div>" +
+    "</div>";
+
+  $("#cta-watchlists").addEventListener("click", function(){ showTab("watchlists"); });
+  $("#cta-alerts").addEventListener("click", function(){ showTab("alerts"); });
+  $("#cta-optimizer").addEventListener("click", function(){ showTab("optimizer"); });
+
+  renderWatchlistSummary($("#dash-watchlist-summary"));
+  renderSectorDonut($("#dash-sector-donut"));
+  renderIndexChart($("#dash-index-chart"));
+};
+
+function renderWatchlistSummary(root){
+  var lists = STATE.watchlists.lists || {};
+  var keys = Object.keys(lists);
+  if (!keys.length){ root.innerHTML = "<p class='muted'>No watchlists yet.</p>"; return; }
+  var html = "<table><thead><tr><th>List</th><th>Tickers</th><th></th></tr></thead><tbody>";
+  keys.forEach(function(k){
+    var l = lists[k];
+    html += "<tr><td>" + esc(l.label||k) + "</td><td class='muted'>" + (l.tickers||[]).length + " names</td>" +
+      "<td><button class='btn small ghost' data-open-list='" + esc(k) + "'>Open</button></td></tr>";
+  });
+  html += "</tbody></table>";
+  root.innerHTML = html;
+  $all("[data-open-list]", root).forEach(function(b){
+    b.addEventListener("click", function(){
+      lsSet("activeWatchlist", b.dataset.openList);
+      showTab("watchlists");
+    });
+  });
+}
+
+function renderSectorDonut(canvas){
+  var cons = STATE.constituents || [];
+  var bySector = {};
+  cons.forEach(function(c){ bySector[c.sector] = (bySector[c.sector]||0) + c.weight; });
+  var labels = Object.keys(bySector);
+  var colors = ["#4fd1c5","#f6ad55","#5b8cff","#3ecf8e","#f56565","#a78bfa","#f472b6","#facc15","#22d3ee","#fb923c"];
+  new Chart(canvas.getContext("2d"), {
+    type: "doughnut",
+    data: {
+      labels: labels,
+      datasets: [{ data: labels.map(function(l){ return bySector[l]; }), backgroundColor: labels.map(function(l,i){ return colors[i % colors.length]; }) }]
+    },
+    options: { plugins: { legend: { position: "right", labels: { color: "#93a2bb", boxWidth: 12 } } }, maintainAspectRatio:false }
+  });
+}
+
+function renderIndexChart(canvas){
+  var cons = STATE.constituents || [];
+  var tickers = cons.map(function(c){ return c.ticker; });
+  Promise.all(tickers.map(function(t){ return getSeries(t); })).then(function(seriesList){
+    var totalWeight = cons.reduce(function(a,c){ return a+c.weight; }, 0);
+    var baseDates = seriesList[0] ? seriesList[0].dates : [];
+    var composite = baseDates.map(function(d, i){
+      var sum = 0, wsum = 0;
+      seriesList.forEach(function(s, idx){
+        if (!s.closes[0]) return;
+        var norm = s.closes[i] != null ? (s.closes[i]/s.closes[0])*100 : (s.closes[s.closes.length-1]/s.closes[0])*100;
+        sum += norm * cons[idx].weight; wsum += cons[idx].weight;
+      });
+      return wsum ? sum/wsum : null;
+    });
+    new Chart(canvas.getContext("2d"), {
+      type: "line",
+      data: { labels: baseDates, datasets: [{ label:"GMR Nuclear Index", data: composite, borderColor:"#4fd1c5", backgroundColor:"rgba(79,209,197,.12)", fill:true, pointRadius:0, tension:.15 }] },
+      options: { maintainAspectRatio:false, scales:{ x:{ ticks:{ color:"#93a2bb", maxTicksLimit:8 }, grid:{color:"#1b2536"} }, y:{ ticks:{color:"#93a2bb"}, grid:{color:"#1b2536"} } }, plugins:{ legend:{ labels:{ color:"#93a2bb" } } } }
+    });
+  }).catch(function(e){ console.error("GMR: index chart failed", e); canvas.parentElement.innerHTML = "<p class='muted'>Chart unavailable right now.</p>"; });
+}
+"""
+
+APP_JS = JS_OPEN + JS_CORE + JS_PROXY + JS_ROUTER + JS_DASHBOARD + JS_CLOSE
+
+
+if __name__ == "__main__":
+    build()
