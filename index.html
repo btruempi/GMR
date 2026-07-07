@@ -113,6 +113,11 @@ footer.sitefoot b{color:var(--text)}
   padding:6px 2px;margin-bottom:2px;min-height:26px}
 .adv-readout b{color:var(--text);font-weight:700}
 .adv-readout .ro-date{color:var(--text);font-weight:700;font-size:13px}
+.zoom-hint{margin-left:auto;font-size:11.5px;opacity:.75}
+@media(max-width:720px){ .zoom-hint{display:none} }
+td.caret{color:var(--muted);width:22px;text-align:center;user-select:none}
+tr.row-open{background:var(--panel2)}
+tr.row-open td.caret{color:var(--accent)}
 </style>
 </head>
 <body>
@@ -980,9 +985,12 @@ function renderWatchlistTable(list){
         var mfiVal = mfiSeries[mfiSeries.length-1].p;
         return {ticker:r.ticker, price:price, chg:chg, rsi:rsiVal, mfi:mfiVal, status:status, synthetic:s.synthetic};
       });
-      var html = "<table><thead><tr><th>Ticker</th><th>Price</th><th>Chg</th><th>RSI(14)</th><th>MFI(14)</th><th>Money Flow</th><th></th></tr></thead><tbody>";
+      var html = "<p class='muted small' style='margin:0 0 6px'>Click any row to open its interactive chart &amp; analytics below.</p>" +
+        "<table><thead><tr><th></th><th>Ticker</th><th>Price</th><th>Chg</th><th>RSI(14)</th><th>MFI(14)</th><th>Money Flow</th><th></th></tr></thead><tbody>";
       rows.forEach(function(row){
-        html += "<tr class='clickable' data-row-ticker='" + esc(row.ticker) + "'>" +
+        var isOpen = WL_EXPANDED === row.ticker;
+        html += "<tr class='clickable" + (isOpen?" row-open":"") + "' data-row-ticker='" + esc(row.ticker) + "'>" +
+          "<td class='caret'>" + (isOpen?"&#9662;":"&#9656;") + "</td>" +
           "<td>" + esc(row.ticker) + (row.synthetic ? " <span class='tag'>sample data</span>" : "") + "</td>" +
           "<td>" + fmtPrice(row.price) + "</td>" +
           "<td class='" + pctClass(row.chg) + "'>" + fmtPct(row.chg) + "</td>" +
@@ -1006,7 +1014,15 @@ function renderWatchlistTable(list){
       $all("[data-row-ticker]", wrap).forEach(function(tr){
         tr.addEventListener("click", function(){
           WL_EXPANDED = (WL_EXPANDED === tr.dataset.rowTicker) ? null : tr.dataset.rowTicker;
+          // update carets/highlight in-place, then (re)draw the chart
+          $all("tr[data-row-ticker]", wrap).forEach(function(row){
+            var open = row.dataset.rowTicker === WL_EXPANDED;
+            row.className = "clickable" + (open?" row-open":"");
+            var caret = row.querySelector(".caret"); if (caret) caret.innerHTML = open?"&#9662;":"&#9656;";
+          });
           renderWatchlistChart(list);
+          var chartEl = $("#wl-chart-wrap");
+          if (WL_EXPANDED && chartEl) chartEl.scrollIntoView({behavior:"smooth", block:"nearest"});
         });
       });
 
@@ -1023,11 +1039,19 @@ function renderWatchlistChart(list){
   if (!WL_EXPANDED || list.tickers.indexOf(WL_EXPANDED) === -1){ wrap.innerHTML = ""; return; }
   var ticker = WL_EXPANDED;
   wrap.innerHTML =
-    "<div class='section-title'>" + esc(ticker) + " chart</div>" +
-    "<div id='wl-adv-chart'></div>";
+    "<div class='card' style='margin-top:14px'>" +
+      "<div class='flex-between'>" +
+        "<h3 style='margin:0;color:var(--text);text-transform:none;font-size:16px'>" + esc(ticker) + " &mdash; trend &amp; analytics</h3>" +
+        "<button class='btn small ghost' id='wl-open-companies'>Open full analytics &rarr;</button>" +
+      "</div>" +
+      "<div id='wl-metrics' class='adv-readout' style='margin-top:8px'></div>" +
+      "<div id='wl-adv-chart' style='margin-top:6px'></div>" +
+    "</div>";
+  $("#wl-open-companies").addEventListener("click", function(){
+    CO_TICKER = ticker; lsSet("companiesTicker", ticker); showTab("companies");
+  });
   getSeries(ticker).then(function(s){
-    // reuse the full Yahoo-style component; the per-list indicator toggles seed
-    // which overlays start on, but the in-chart controls take over from there.
+    renderCompactMetrics($("#wl-metrics"), s);
     var ind = list.indicators || {};
     var stateKey = "advChart_watchlist";
     if (!lsGet(stateKey, null)){
@@ -1037,6 +1061,27 @@ function renderWatchlistChart(list){
     }
     renderAdvancedChart($("#wl-adv-chart"), ticker, s, stateKey);
   });
+}
+
+// compact analytics strip reused by the watchlist expansion
+function renderCompactMetrics(root, s){
+  if (!root) return;
+  var closes = s.closes, dates = s.dates, volumes = s.volumes;
+  var price = closes[closes.length-1];
+  var chg = closes.length>1 ? ((price/closes[closes.length-2])-1)*100 : null;
+  var rsi = IND.rsi(dates, closes, 14); var rsiVal = rsi[rsi.length-1].p;
+  var mfi = IND.mfi(dates, closes, volumes, 14); var mfiVal = mfi[mfi.length-1].p;
+  var status = IND.moneyFlowStatus(IND.cmf(dates, closes, volumes, 21), 21);
+  var oneY = closes.length>=252 ? ((price/closes[closes.length-252])-1)*100 : ((price/closes[0])-1)*100;
+  var w52 = closes.slice(-252); var hi=Math.max.apply(null,w52), lo=Math.min.apply(null,w52);
+  root.innerHTML =
+    "<span>Price <b>" + fmtPrice(price) + "</b></span>" +
+    "<span class='" + pctClass(chg) + "'>" + fmtPct(chg) + " today</span>" +
+    "<span>RSI <b>" + fmtNum(rsiVal,1) + "</b></span>" +
+    "<span>MFI <b>" + fmtNum(mfiVal,1) + "</b></span>" +
+    "<span>Flow <span class='pill " + status.cls + "'>" + status.label + "</span></span>" +
+    "<span>1Y <b class='" + pctClass(oneY) + "'>" + fmtPct(oneY) + "</b></span>" +
+    "<span class='muted'>52W " + fmtPrice(lo) + "&ndash;" + fmtPrice(hi) + "</span>";
 }
 
 // ---- Advanced Yahoo-style chart component -------------------------------
@@ -1063,6 +1108,24 @@ var crosshairPlugin = {
   }
 };
 
+// draws the translucent drag-to-zoom selection rectangle
+var dragPlugin = {
+  id: "gmrDrag",
+  afterDatasetsDraw: function(chart){
+    var r = chart.$dragRect;
+    if (!r) return;
+    var a = chart.chartArea, ctx = chart.ctx;
+    var x1 = Math.max(a.left, Math.min(r.x1, r.x2)), x2 = Math.min(a.right, Math.max(r.x1, r.x2));
+    ctx.save();
+    ctx.fillStyle = "rgba(79,209,197,.14)";
+    ctx.strokeStyle = "rgba(79,209,197,.6)";
+    ctx.lineWidth = 1;
+    ctx.fillRect(x1, a.top, x2-x1, a.bottom-a.top);
+    ctx.beginPath(); ctx.moveTo(x1, a.top); ctx.lineTo(x1, a.bottom); ctx.moveTo(x2, a.top); ctx.lineTo(x2, a.bottom); ctx.stroke();
+    ctx.restore();
+  }
+};
+
 function advLine(label, arr, color, opts){
   var ds = { type:"line", label:label, data:arr.map(function(x){return x.p;}), borderColor:color, pointRadius:0, borderWidth:1.3, tension:.1, order:0 };
   if (opts) Object.keys(opts).forEach(function(k){ ds[k]=opts[k]; });
@@ -1073,12 +1136,14 @@ function advLine(label, arr, color, opts){
 function renderAdvancedChart(root, ticker, fullSeries, stateKey){
   var state = lsGet(stateKey, {range:"1Y", type:"candles", overlays:{sma20:true, sma50:true, sma200:false, ema21:false, bb:false, vwap:false}, osc:"rsi"});
   state.overlays = state.overlays || {};
-  var ctx = { root:root, ticker:ticker, series:fullSeries, state:state, stateKey:stateKey, charts:{} };
+  var ctx = { root:root, ticker:ticker, series:fullSeries, state:state, stateKey:stateKey, charts:{}, zoom:null };
 
   root.innerHTML =
     "<div class='chart-toolbar'>" +
       "<div class='seg' id='adv-range'>" + ADV_RANGES.map(function(r){ return "<button data-range='" + r[0] + "'" + (state.range===r[0]?" class='on'":"") + ">" + r[0] + "</button>"; }).join("") + "</div>" +
       "<div class='seg' id='adv-type'>" + [["candles","Candles"],["area","Area"],["line","Line"]].map(function(t){ return "<button data-type='" + t[0] + "'" + (state.type===t[0]?" class='on'":"") + ">" + t[1] + "</button>"; }).join("") + "</div>" +
+      "<button class='btn small ghost hidden' id='adv-reset-zoom'>&#10227; Reset zoom</button>" +
+      "<span class='muted small zoom-hint' style='align-self:center'>Drag across the chart to zoom &middot; double-click to reset</span>" +
     "</div>" +
     "<div class='chart-toolbar'>" +
       "<span class='muted small' style='align-self:center'>Overlays:</span>" +
@@ -1101,27 +1166,38 @@ function renderAdvancedChart(root, ticker, fullSeries, stateKey){
       });
     });
   }
-  bindSeg("#adv-range", "data-range", function(v){ state.range=v; saveState(); $all("#adv-range button",root).forEach(function(x){x.className=(x.getAttribute("data-range")===v)?"on":"";}); drawAdvanced(ctx); });
+  bindSeg("#adv-range", "data-range", function(v){ state.range=v; ctx.zoom=null; saveState(); $all("#adv-range button",root).forEach(function(x){x.className=(x.getAttribute("data-range")===v)?"on":"";}); drawAdvanced(ctx); });
   bindSeg("#adv-type", "data-type", function(v){ state.type=v; saveState(); $all("#adv-type button",root).forEach(function(x){x.className=(x.getAttribute("data-type")===v)?"on":"";}); drawAdvanced(ctx); });
   bindSeg("#adv-overlays", "data-ov", function(v,b){ state.overlays[v]=!state.overlays[v]; saveState(); b.className=state.overlays[v]?"on":""; drawAdvanced(ctx); });
   bindSeg("#adv-osc", "data-osc", function(v){ state.osc=v; saveState(); $all("#adv-osc button",root).forEach(function(x){x.className=(x.getAttribute("data-osc")===v)?"on":"";}); drawAdvanced(ctx); });
+  $("#adv-reset-zoom", root).addEventListener("click", function(){ ctx.zoom=null; drawAdvanced(ctx); });
 
   drawAdvanced(ctx);
 }
 
-function sliceAdv(series, range){
-  var n = series.closes.length, start = 0;
-  if (range === "Max") start = 0;
-  else if (range === "YTD"){
-    var y = new Date().getFullYear();
-    start = series.dates.findIndex(function(d){ return d >= (y + "-01-01"); });
-    if (start < 0) start = 0;
+// Absolute index window for the current view: honors a drag-zoom window if set,
+// otherwise the selected range button. Returns {start, slice}.
+function computeView(ctx){
+  var series = ctx.series, n = series.closes.length;
+  var start, end;
+  if (ctx.zoom){
+    start = Math.max(0, ctx.zoom.start);
+    end = Math.min(n-1, ctx.zoom.end);
   } else {
-    var days = 252; ADV_RANGES.forEach(function(r){ if(r[0]===range) days=r[1]; });
-    start = Math.max(0, n - days);
+    end = n-1;
+    var range = ctx.state.range;
+    if (range === "Max") start = 0;
+    else if (range === "YTD"){
+      var y = new Date().getFullYear();
+      start = series.dates.findIndex(function(d){ return d >= (y + "-01-01"); });
+      if (start < 0) start = 0;
+    } else {
+      var days = 252; ADV_RANGES.forEach(function(r){ if(r[0]===range) days=r[1]; });
+      start = Math.max(0, n - days);
+    }
   }
-  function sl(a){ return a ? a.slice(start) : null; }
-  return { dates:sl(series.dates), opens:sl(series.opens), highs:sl(series.highs), lows:sl(series.lows), closes:sl(series.closes), volumes:sl(series.volumes), synthetic:series.synthetic };
+  function sl(a){ return a ? a.slice(start, end+1) : null; }
+  return { start:start, slice:{ dates:sl(series.dates), opens:sl(series.opens), highs:sl(series.highs), lows:sl(series.lows), closes:sl(series.closes), volumes:sl(series.volumes), synthetic:series.synthetic } };
 }
 
 function baseAxes(showX){
@@ -1132,9 +1208,13 @@ function baseAxes(showX){
 }
 
 function drawAdvanced(ctx){
-  var s = sliceAdv(ctx.series, ctx.state.range);
+  var view = computeView(ctx);
+  ctx.viewStart = view.start;
+  var s = view.slice;
   var labels = s.dates;
   var st = ctx.state;
+  var resetBtn = $("#adv-reset-zoom", ctx.root);
+  if (resetBtn) resetBtn.className = "btn small ghost" + (ctx.zoom ? "" : " hidden");
   Object.keys(ctx.charts).forEach(function(k){ if(ctx.charts[k]) ctx.charts[k].destroy(); });
 
   var colorByDir = s.closes.map(function(c,i){ return c >= s.opens[i] ? UP : DOWN; });
@@ -1168,7 +1248,7 @@ function drawAdvanced(ctx){
       scales:{ x: baseAxes(false).x, y:{ position:"right", grid:{color:GRID}, ticks:{color:AXIS} } },
       plugins:{ legend:{ display:st.type!=="candles", labels:{color:AXIS, boxWidth:10, filter:function(l){return l.text!=="wick"&&l.text!=="body";}} }, tooltip:{ enabled:false } }
     },
-    plugins:[crosshairPlugin]
+    plugins:[crosshairPlugin, dragPlugin]
   });
 
   // ---- volume ----
@@ -1178,14 +1258,14 @@ function drawAdvanced(ctx){
     options:{ maintainAspectRatio:false, animation:false,
       scales:{ x:{ grid:{display:false}, ticks:{display:false} }, y:{ position:"right", grid:{color:GRID}, ticks:{color:AXIS, maxTicksLimit:3, callback:function(v){ return v>=1e6?(v/1e6).toFixed(0)+"M":(v/1e3).toFixed(0)+"K"; }} } },
       plugins:{ legend:{display:false}, tooltip:{enabled:false} } },
-    plugins:[crosshairPlugin]
+    plugins:[crosshairPlugin, dragPlugin]
   });
 
   // ---- oscillator ----
   drawOsc(ctx, s, labels);
 
-  // ---- linked crosshair + readout ----
-  wireCrosshair(ctx, s);
+  // ---- linked crosshair + drag-to-zoom + readout ----
+  wireInteractions(ctx, s);
   updateReadout(ctx, s, s.closes.length-1);
 }
 
@@ -1215,30 +1295,64 @@ function drawOsc(ctx, s, labels){
     options:{ maintainAspectRatio:false, animation:false,
       scales:{ x:{ grid:{color:GRID, display:false}, ticks:{color:AXIS, maxTicksLimit:8, maxRotation:0} }, y:yOpts },
       plugins:{ legend:{ labels:{color:AXIS, boxWidth:10} }, tooltip:{enabled:false} } },
-    plugins:[crosshairPlugin]
+    plugins:[crosshairPlugin, dragPlugin]
   });
 }
 
-function wireCrosshair(ctx, s){
-  var charts = [ctx.charts.price, ctx.charts.volume, ctx.charts.osc];
-  function handler(evt){
-    var chart = this;
+function wireInteractions(ctx, s){
+  var charts = [ctx.charts.price, ctx.charts.volume, ctx.charts.osc].filter(Boolean);
+  var drag = null;
+  function localIdx(chart, clientX){
     var rect = chart.canvas.getBoundingClientRect();
-    var x = (evt.touches ? evt.touches[0].clientX : evt.clientX) - rect.left;
-    var idx = Math.round(chart.scales.x.getValueForPixel(x));
-    if (idx < 0) idx = 0; if (idx >= s.closes.length) idx = s.closes.length-1;
-    charts.forEach(function(c){ if(c){ c.$hoverIndex = idx; c.update("none"); } });
+    var idx = Math.round(chart.scales.x.getValueForPixel(clientX - rect.left));
+    return Math.max(0, Math.min(s.closes.length-1, idx));
+  }
+  function pxInChart(chart, clientX){
+    var rect = chart.canvas.getBoundingClientRect();
+    return clientX - rect.left;
+  }
+  function moveHover(clientX){
+    var idx = localIdx(charts[0], clientX);
+    charts.forEach(function(c){ c.$hoverIndex = idx; c.$dragRect = null; c.update("none"); });
     updateReadout(ctx, s, idx);
   }
-  function clear(){
-    charts.forEach(function(c){ if(c){ c.$hoverIndex = null; c.update("none"); } });
-    updateReadout(ctx, s, s.closes.length-1);
+  function endDrag(clientX){
+    if (!drag) return;
+    var endIdx = localIdx(drag.chart, clientX);
+    charts.forEach(function(c){ c.$dragRect = null; });
+    var lo = Math.min(drag.startIdx, endIdx), hi = Math.max(drag.startIdx, endIdx);
+    if (drag.moved && (hi - lo) >= 2){
+      // map indices within the current view back to the full series
+      ctx.zoom = { start: ctx.viewStart + lo, end: ctx.viewStart + hi };
+      drag = null;
+      drawAdvanced(ctx);
+    } else {
+      var c = drag.chart; drag = null; if (c) c.draw();
+    }
   }
-  charts.forEach(function(c){
-    if (!c) return;
-    c.canvas.onmousemove = handler.bind(c);
-    c.canvas.ontouchmove = handler.bind(c);
-    c.canvas.onmouseleave = clear;
+  charts.forEach(function(chart){
+    var cv = chart.canvas;
+    cv.style.cursor = "crosshair";
+    cv.onmousedown = function(e){ drag = { chart:chart, startX:pxInChart(chart,e.clientX), startIdx:localIdx(chart,e.clientX), moved:false }; e.preventDefault(); };
+    cv.onmousemove = function(e){
+      if (drag){
+        drag.moved = true;
+        drag.chart.$dragRect = { x1:drag.startX, x2:pxInChart(drag.chart, e.clientX) };
+        drag.chart.$hoverIndex = null;
+        drag.chart.draw();
+      } else {
+        moveHover(e.clientX);
+      }
+    };
+    cv.onmouseup = function(e){ endDrag(e.clientX); };
+    cv.onmouseleave = function(){
+      if (drag){ var c = drag.chart; drag = null; charts.forEach(function(x){ x.$dragRect=null; }); if(c) c.draw(); }
+      charts.forEach(function(c){ c.$hoverIndex = null; c.update("none"); });
+      updateReadout(ctx, s, s.closes.length-1);
+    };
+    cv.ondblclick = function(){ if (ctx.zoom){ ctx.zoom = null; drawAdvanced(ctx); } };
+    // touch: hover only (drag-zoom via touch is finicky; range buttons cover it)
+    cv.ontouchmove = function(e){ if (e.touches[0]) moveHover(e.touches[0].clientX); };
   });
 }
 

@@ -19,8 +19,8 @@ Python + GitHub Actions backend for scheduled alerts.
 | Tab | What it does |
 |-----|--------------|
 | **Dashboard** | Featured composite index chart, sector doughnut, quick actions. |
-| **Watchlists** | The main workflow. Named baskets, one-click clones of 30+ sector presets, per-list indicator toggles, a table with quotes + RSI + MFI + a money-flow status column, and click-to-expand charts with a linked oscillator pane. |
-| **Companies** | Look up any US-listed ticker (live from Yahoo/Stooq), full chart + key metrics, and a compare-multiple-stocks card. |
+| **Watchlists** | The main workflow. Named baskets, one-click clones of 30+ sector presets, per-list indicator toggles, a table with quotes + RSI + MFI + a money-flow status column. **Click any row** to open the same full Yahoo-style chart (candles, overlays, volume, oscillator, drag-to-zoom) plus an analytics header. |
+| **Companies** | Look up any US-listed ticker with a full Yahoo-style chart: candlestick / line / area, range selector (1M–Max), SMA/EMA/Bollinger/VWAP overlays, a volume panel, an RSI/MACD/MFI/CMF oscillator pane, a synced crosshair with OHLCV readout, and **drag-to-zoom**. Plus rich key metrics and a compare card. |
 | **Optimizer** | Max-Sharpe / min-vol / equal-weight / inverse-vol portfolios at 15/20/25% position caps, with a **clickable** efficient frontier. |
 | **Backtest** | Composite vs SPY / URA / NLR, lookback 1Y–Max, rolling drawdown + rolling 63-day Sharpe overlays. |
 | **Updates** | Merged catalyst calendar + news feed with type + ticker filters. |
