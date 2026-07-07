@@ -1851,8 +1851,10 @@ function runBacktest(){
       datasets.push({ label:t, data:rebased, borderColor:colors[t]||"#e7edf7", pointRadius:0, borderWidth:1.5, tension:.1 });
     });
 
+    var perfCanvas = $("#bt-perf-canvas");
+    if (!perfCanvas) return; // user navigated away before data loaded
     if (BT_CHARTS.perf) BT_CHARTS.perf.destroy();
-    BT_CHARTS.perf = new Chart($("#bt-perf-canvas").getContext("2d"), {
+    BT_CHARTS.perf = new Chart(perfCanvas.getContext("2d"), {
       type:"line", data:{ labels:baseDates, datasets:datasets },
       options:{ maintainAspectRatio:false, scales:{ x:{ ticks:{color:"#93a2bb", maxTicksLimit:8}, grid:{color:"#1b2536"} }, y:{ ticks:{color:"#93a2bb"}, grid:{color:"#1b2536"} } }, plugins:{ legend:{ labels:{color:"#93a2bb", boxWidth:12} } } }
     });
@@ -1914,6 +1916,7 @@ function rollingSharpe(series, window){
 
 function renderOverlayPanels(dates, composite){
   var root = $("#bt-overlay-panels");
+  if (!root) return; // navigated away before async data resolved
   root.innerHTML = "";
   if (BT_OVERLAYS.drawdown){
     var card = document.createElement("div"); card.className = "card";
