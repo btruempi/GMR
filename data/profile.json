@@ -1,0 +1,12 @@
+{
+  "capital": 10000,
+  "maxPosition": 20,
+  "minPosition": 5,
+  "holdMin": 6,
+  "holdMax": 10,
+  "targetVol": 20,
+  "maxDrawdown": 25,
+  "exclude": [],
+  "require": [],
+  "objective": "max-sharpe"
+}

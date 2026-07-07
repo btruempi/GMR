@@ -1,0 +1,121 @@
+[
+  {"key": "nuclear",       "label": "Nuclear",                    "aliases": ["nuclear", "uranium power", "atomic"],
+   "desc": "Featured index constituents — uranium miners, enrichment, utilities, SMR developers.",
+   "tickers": ["CCJ","CEG","LEU","BWXT","VST","SMR","OKLO","UEC","UUUU","DNN","NXE","GEV","TLN","NNE","FLR"]},
+
+  {"key": "semiconductors", "label": "Semiconductors",            "aliases": ["semiconductors","semis","semi","chip","chips","chipmakers"],
+   "desc": "Chip designers, foundries, and equipment makers.",
+   "tickers": ["NVDA","AMD","AVGO","TSM","INTC","QCOM","TXN","MU","ASML","AMAT","LRCX","KLAC","ON","MRVL","ADI"]},
+
+  {"key": "ai_infra",       "label": "AI Infrastructure",         "aliases": ["ai infrastructure","ai infra","data center ai","gpu","compute"],
+   "desc": "GPUs, servers, networking, and power for AI data centers.",
+   "tickers": ["NVDA","AVGO","SMCI","DELL","VRT","ANET","MRVL","MU","ARM","TSM","MSFT","ORCL"]},
+
+  {"key": "ai_apps",        "label": "AI Applications",           "aliases": ["ai applications","ai apps","applied ai","ai software"],
+   "desc": "Software companies building products on top of AI models.",
+   "tickers": ["MSFT","GOOGL","META","PLTR","CRM","NOW","SNOW","PATH","ADBE","IBM","ORCL"]},
+
+  {"key": "cloud_saas",     "label": "Cloud & SaaS",              "aliases": ["cloud","saas","software as a service","enterprise software"],
+   "desc": "Cloud infrastructure and software-as-a-service leaders.",
+   "tickers": ["CRM","NOW","WDAY","SNOW","DDOG","NET","MDB","TEAM","ADBE","INTU","SHOP","HUBS"]},
+
+  {"key": "cybersecurity",  "label": "Cybersecurity",             "aliases": ["cybersecurity","cyber","security software","infosec"],
+   "desc": "Network, endpoint, cloud, and identity security vendors.",
+   "tickers": ["CRWD","PANW","FTNT","ZS","S","OKTA","CYBR","NET","QLYS","TENB"]},
+
+  {"key": "defense_aero",   "label": "Defense & Aerospace",       "aliases": ["defense","military","aerospace","defence"],
+   "desc": "Prime contractors and aerospace/defense suppliers.",
+   "tickers": ["LMT","RTX","NOC","GD","BA","LHX","TDG","HII","AVAV","KTOS"]},
+
+  {"key": "space_sat",      "label": "Space & Satellites",        "aliases": ["space","rocket","satellites","launch"],
+   "desc": "Launch providers, satellite operators, and space infrastructure.",
+   "tickers": ["RKLB","ASTS","LUNR","PL","IRDM","VSAT","RDW"]},
+
+  {"key": "robotics",       "label": "Robotics & Automation",     "aliases": ["robotics","automation","robots","industrial automation"],
+   "desc": "Industrial robotics, automation, and machine-vision companies.",
+   "tickers": ["ISRG","ROK","TER","ZBRA","CGNX","PATH","IRBT","SYM"]},
+
+  {"key": "uranium_fuel",   "label": "Uranium & Fuel Cycle",      "aliases": ["uranium","fuel cycle","enrichment"],
+   "desc": "Pure-play uranium mining, conversion, and enrichment companies.",
+   "tickers": ["CCJ","UEC","UUUU","DNN","NXE","LEU","EU"]},
+
+  {"key": "rare_earths",    "label": "Rare Earths & Miners",      "aliases": ["rare earths","rare earth","critical minerals"],
+   "desc": "Rare-earth and critical-mineral miners and processors.",
+   "tickers": ["MP","USAR","TMRC","UUUU","CRML"]},
+
+  {"key": "data_centers",   "label": "Data Centers & REITs",      "aliases": ["data centers","data center reits","digital infrastructure"],
+   "desc": "Data center REITs and digital infrastructure operators.",
+   "tickers": ["EQIX","DLR","VRT","IRM","AMT","CCI"]},
+
+  {"key": "neuroscience",   "label": "Neuroscience & Neurotech",  "aliases": ["neuroscience","neuro","brain","neurotech","cns"],
+   "desc": "CNS-focused biotech and neurotechnology companies.",
+   "tickers": ["BIIB","LLY","SAVA","ACAD","AXSM","INCY","IONS","SGMO","NBIX"]},
+
+  {"key": "biotech",        "label": "Biotech (Big & Mid)",       "aliases": ["biotech","biotechnology","gene","pharma"],
+   "desc": "Large and mid-cap biotech and pharma names.",
+   "tickers": ["AMGN","GILD","VRTX","REGN","BIIB","MRNA","BMRN","ALNY"]},
+
+  {"key": "genomics",       "label": "Genomics & Diagnostics",    "aliases": ["genomics","diagnostics","gene sequencing","gene editing"],
+   "desc": "Sequencing, diagnostics, and gene-editing companies.",
+   "tickers": ["ILMN","PACB","NTRA","EXAS","TWST","CRSP","QGEN"]},
+
+  {"key": "med_devices",    "label": "Medical Devices",           "aliases": ["medical devices","medtech","med devices"],
+   "desc": "Surgical robotics, cardiac, and diagnostic device makers.",
+   "tickers": ["ISRG","MDT","SYK","BSX","ABT","EW","ZBH","DXCM"]},
+
+  {"key": "glp1",           "label": "Weight Loss / GLP-1",       "aliases": ["weight loss","glp-1","glp1","obesity"],
+   "desc": "GLP-1 and metabolic-disease focused pharma names.",
+   "tickers": ["LLY","NVO","AMGN","VKTX","STRC","MDGL"]},
+
+  {"key": "clean_energy",   "label": "Clean Energy",              "aliases": ["clean energy","renewables","green energy"],
+   "desc": "Diversified renewable and clean power generators.",
+   "tickers": ["NEE","FSLR","ENPH","BEP","AES","CWEN"]},
+
+  {"key": "ev_battery",     "label": "EVs & Batteries",           "aliases": ["ev","evs","battery","batteries","electric vehicles"],
+   "desc": "Electric vehicle makers and battery/materials suppliers.",
+   "tickers": ["TSLA","RIVN","LCID","ALB","PLL","QS","LAC"]},
+
+  {"key": "solar",          "label": "Solar",                     "aliases": ["solar","photovoltaic","pv"],
+   "desc": "Solar panel makers, inverters, and installers.",
+   "tickers": ["FSLR","ENPH","SEDG","RUN","NOVA","ARRY"]},
+
+  {"key": "hydrogen",       "label": "Hydrogen",                  "aliases": ["hydrogen","fuel cell","fuel cells"],
+   "desc": "Hydrogen production and fuel-cell companies.",
+   "tickers": ["PLUG","BE","BLDP","FCEL"]},
+
+  {"key": "fintech",        "label": "Fintech & Payments",        "aliases": ["fintech","payments","payment processors"],
+   "desc": "Payment networks, processors, and fintech platforms.",
+   "tickers": ["V","MA","PYPL","SQ","FI","GPN","AFRM","SOFI"]},
+
+  {"key": "crypto",         "label": "Crypto Exposure",           "aliases": ["crypto","bitcoin","blockchain","cryptocurrency"],
+   "desc": "Public companies with direct crypto-market exposure.",
+   "tickers": ["COIN","MSTR","MARA","RIOT","HOOD","BITF"]},
+
+  {"key": "ecommerce",      "label": "E-commerce & Retail",       "aliases": ["ecommerce","e-commerce","online retail","retail"],
+   "desc": "Online retail and e-commerce platforms.",
+   "tickers": ["AMZN","SHOP","ETSY","CHWY","W","EBAY"]},
+
+  {"key": "streaming",      "label": "Streaming & Gaming",        "aliases": ["streaming","gaming","video games","media"],
+   "desc": "Streaming media and video game publishers.",
+   "tickers": ["NFLX","RBLX","EA","TTWO","DIS","SPOT"]},
+
+  {"key": "homebuilders",   "label": "Homebuilders",              "aliases": ["homebuilders","home builders","housing"],
+   "desc": "Major US residential homebuilders.",
+   "tickers": ["DHI","LEN","PHM","NVR","TOL","KBH"]},
+
+  {"key": "airlines",       "label": "Airlines",                  "aliases": ["airlines","air travel","airline"],
+   "desc": "Major US passenger airlines.",
+   "tickers": ["DAL","LUV","UAL","AAL","ALK"]},
+
+  {"key": "agtech",         "label": "Ag Tech & Food",            "aliases": ["ag tech","agtech","agriculture","food","farming"],
+   "desc": "Agricultural equipment, inputs, and food producers.",
+   "tickers": ["DE","CTVA","MOS","CF","ADM","BG"]},
+
+  {"key": "staples",        "label": "Consumer Staples",          "aliases": ["consumer staples","staples","household goods"],
+   "desc": "Defensive consumer staples and household goods makers.",
+   "tickers": ["PG","KO","PEP","CL","KMB","WMT","COST"]},
+
+  {"key": "dividend_arist", "label": "Dividend Aristocrats",      "aliases": ["dividend aristocrats","dividends","dividend stocks"],
+   "desc": "Long-history dividend growers across sectors.",
+   "tickers": ["JNJ","MMM","KO","PG","XOM","CVX","ABT","MCD"]}
+]

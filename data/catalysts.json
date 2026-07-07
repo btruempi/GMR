@@ -1,0 +1,12 @@
+[
+  {"date": "2026-07-14", "ticker": "CEG",  "type": "catalyst", "title": "Q2 earnings call",                     "summary": "Constellation Energy reports Q2 results; watch capacity-market commentary."},
+  {"date": "2026-07-21", "ticker": "CCJ",  "type": "catalyst", "title": "Q2 earnings + production update",       "summary": "Cameco quarterly production and cost guidance update."},
+  {"date": "2026-07-28", "ticker": "OKLO", "type": "catalyst", "title": "NRC licensing milestone review",        "summary": "Expected regulatory update on Aurora powerhouse licensing timeline."},
+  {"date": "2026-08-04", "ticker": "SMR",  "type": "catalyst", "title": "DOE partnership update",                "summary": "Potential update on DOE cost-share program milestones."},
+  {"date": "2026-08-11", "ticker": "LEU",  "type": "catalyst", "title": "HALEU contract news window",           "summary": "Watch for DOE HALEU enrichment contract developments."},
+  {"date": "2026-08-18", "ticker": "MARKET", "type": "catalyst", "title": "FOMC rate decision",                 "summary": "Federal Reserve rate decision; growth names are typically rate-sensitive."},
+  {"date": "2026-06-15", "ticker": "CCJ",  "type": "news", "title": "Cameco raises 2026 production guidance",     "summary": "Company cited stronger-than-expected mill throughput."},
+  {"date": "2026-06-22", "ticker": "VST",  "type": "news", "title": "Vistra signs new data-center power deal",    "summary": "Multi-year PPA announced with a hyperscale data center operator."},
+  {"date": "2026-06-29", "ticker": "BWXT", "type": "news", "title": "BWXT wins naval reactor component contract", "summary": "New multi-year award from the US Navy for reactor components."},
+  {"date": "2026-07-01", "ticker": "NNE",  "type": "news", "title": "NANO Nuclear announces test reactor site",   "summary": "Company selects site for its next microreactor demonstration."}
+]

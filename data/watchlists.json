@@ -1,0 +1,11 @@
+{
+  "active": "nuclear",
+  "lists": {
+    "nuclear": {
+      "label": "Nuclear",
+      "desc": "Featured index constituents — uranium miners, enrichment, utilities, and SMR developers.",
+      "tickers": ["CCJ", "CEG", "LEU", "BWXT", "VST", "SMR", "OKLO", "UEC", "UUUU", "DNN", "NXE", "GEV", "TLN", "NNE", "FLR"],
+      "indicators": {"sma": true, "ema": false, "rsi": true, "bollinger": false, "macd": true, "vwap": false}
+    }
+  }
+}

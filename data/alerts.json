@@ -1,0 +1,10 @@
+{
+  "channels": {
+    "email": "",
+    "sms": {
+      "number": "",
+      "carrier": ""
+    }
+  },
+  "rules": []
+}

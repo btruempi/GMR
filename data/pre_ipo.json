@@ -1,0 +1,12 @@
+[
+  {"name": "Kairos Power",        "sector": "Advanced Fission (Molten Salt)", "status": "private", "desc": "DOE ARDP awardee building the Hermes molten-salt-cooled demonstration reactor."},
+  {"name": "TerraPower",         "sector": "Advanced Fission (Sodium Fast)", "status": "private", "desc": "Bill Gates-backed developer of the Natrium sodium-fast reactor with molten salt storage."},
+  {"name": "X-energy",           "sector": "Advanced Fission (Pebble Bed)",  "status": "private", "desc": "Developer of the Xe-100 high-temperature gas-cooled pebble bed reactor."},
+  {"name": "Terrestrial Energy", "sector": "Advanced Fission (Molten Salt)", "status": "private", "desc": "Integral molten salt reactor developer targeting industrial heat and power."},
+  {"name": "Anthropic",          "sector": "AI Infrastructure",             "status": "private", "desc": "Frontier AI lab; large compute buildout with hyperscaler partnerships."},
+  {"name": "SpaceX",             "sector": "Space & Satellites",            "status": "private", "desc": "Launch, Starlink, and Starship; periodic secondary tender rounds."},
+  {"name": "Databricks",         "sector": "Cloud & Data/AI",               "status": "filed",   "desc": "Data and AI platform; reportedly evaluating public listing paths."},
+  {"name": "Stripe",             "sector": "Fintech & Payments",            "status": "private", "desc": "Payments infrastructure company with periodic tender-offer valuations."},
+  {"name": "Cerebras Systems",   "sector": "AI Infrastructure",             "status": "filed",   "desc": "AI chipmaker that filed confidentially for an IPO."},
+  {"name": "Discord",            "sector": "Consumer/Gaming Social",       "status": "imminent","desc": "Reported to be preparing for a public listing."}
+]

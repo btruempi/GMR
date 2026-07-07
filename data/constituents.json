@@ -1,0 +1,17 @@
+[
+  {"ticker": "CCJ",   "name": "Cameco Corporation",       "sector": "Uranium Mining",        "tier": 1, "weight": 12, "desc": "World's largest publicly traded uranium producer."},
+  {"ticker": "CEG",   "name": "Constellation Energy",     "sector": "Nuclear Utility",       "tier": 1, "weight": 10, "desc": "Largest US nuclear power generator by capacity."},
+  {"ticker": "LEU",   "name": "Centrus Energy Corp",      "sector": "Enrichment",            "tier": 1, "weight": 9,  "desc": "Only US-based uranium enrichment supplier."},
+  {"ticker": "BWXT",  "name": "BWX Technologies",         "sector": "Components/Naval",      "tier": 1, "weight": 9,  "desc": "Manufactures nuclear components for utilities and the US Navy."},
+  {"ticker": "VST",   "name": "Vistra Corp",              "sector": "Power Generation",      "tier": 1, "weight": 8,  "desc": "Integrated power producer with a large nuclear fleet."},
+  {"ticker": "SMR",   "name": "NuScale Power Corp",       "sector": "Small Modular Reactors","tier": 2, "weight": 6,  "desc": "First NRC-certified small modular reactor design."},
+  {"ticker": "OKLO",  "name": "Oklo Inc",                 "sector": "Advanced Fission",      "tier": 2, "weight": 6,  "desc": "Advanced fission startup backed by Sam Altman."},
+  {"ticker": "UEC",   "name": "Uranium Energy Corp",      "sector": "Uranium Mining",        "tier": 2, "weight": 5,  "desc": "US-focused uranium mining and production company."},
+  {"ticker": "UUUU",  "name": "Energy Fuels Inc",         "sector": "Uranium/Rare Earths",   "tier": 2, "weight": 5,  "desc": "Largest US uranium producer, diversifying into rare earths."},
+  {"ticker": "DNN",   "name": "Denison Mines Corp",       "sector": "Uranium Mining",        "tier": 2, "weight": 5,  "desc": "Athabasca Basin uranium development and exploration."},
+  {"ticker": "NXE",   "name": "NexGen Energy Ltd",        "sector": "Uranium Mining",        "tier": 2, "weight": 5,  "desc": "Developer of the Rook I uranium project in Saskatchewan."},
+  {"ticker": "GEV",   "name": "GE Vernova Inc",           "sector": "Grid/Power Equipment",  "tier": 2, "weight": 5,  "desc": "Power generation and grid equipment, including nuclear services."},
+  {"ticker": "TLN",   "name": "Talen Energy Corp",        "sector": "Power Generation",      "tier": 2, "weight": 5,  "desc": "Nuclear-heavy independent power producer serving data center demand."},
+  {"ticker": "NNE",   "name": "NANO Nuclear Energy Inc",  "sector": "Microreactors",         "tier": 2, "weight": 5,  "desc": "Early-stage microreactor design and development company."},
+  {"ticker": "FLR",   "name": "Fluor Corporation",        "sector": "Engineering/Construction","tier": 2, "weight": 5, "desc": "Engineering and construction firm active in nuclear builds."}
+]
