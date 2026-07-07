@@ -66,15 +66,24 @@ def fetch_yahoo(ticker):
     result = payload["chart"]["result"][0]
     ts = result["timestamp"]
     q = result["indicators"]["quote"][0]
+    o_raw, h_raw, l_raw = q["open"], q["high"], q["low"]
     closes_raw, volumes_raw = q["close"], q["volume"]
-    dates, closes, volumes = [], [], []
-    for t, c, v in zip(ts, closes_raw, volumes_raw):
+    dates, opens, highs, lows, closes, volumes = [], [], [], [], [], []
+    for i, t in enumerate(ts):
+        c = closes_raw[i]
         if c is None:
             continue
+        # fall back to close when an individual OHLC field is missing
+        o = o_raw[i] if o_raw[i] is not None else c
+        h = h_raw[i] if h_raw[i] is not None else max(o, c)
+        lo = l_raw[i] if l_raw[i] is not None else min(o, c)
         dates.append(datetime.utcfromtimestamp(t).strftime("%Y-%m-%d"))
+        opens.append(round(o, 4))
+        highs.append(round(h, 4))
+        lows.append(round(lo, 4))
         closes.append(round(c, 4))
-        volumes.append(int(v or 0))
-    return dates, closes, volumes
+        volumes.append(int(volumes_raw[i] or 0))
+    return dates, opens, highs, lows, closes, volumes
 
 
 def main():
@@ -84,11 +93,12 @@ def main():
     updated = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     for i, ticker in enumerate(tickers, 1):
         try:
-            dates, closes, volumes = fetch_yahoo(ticker)
+            dates, opens, highs, lows, closes, volumes = fetch_yahoo(ticker)
             if len(closes) < 5:
                 raise ValueError("too few points")
-            out = {"ticker": ticker, "updated": updated,
-                   "dates": dates, "closes": closes, "volumes": volumes}
+            out = {"ticker": ticker, "updated": updated, "dates": dates,
+                   "opens": opens, "highs": highs, "lows": lows,
+                   "closes": closes, "volumes": volumes}
             safe = ticker.replace("/", "-")
             with open(os.path.join(OUT_DIR, safe + ".json"), "w", encoding="utf-8") as f:
                 json.dump(out, f, separators=(",", ":"))
