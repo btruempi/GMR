@@ -729,7 +729,246 @@ function renderIndexChart(canvas){
 }
 """
 
-APP_JS = JS_OPEN + JS_CORE + JS_PROXY + JS_ROUTER + JS_DASHBOARD + JS_CLOSE
+JS_WATCHLISTS = r"""
+// ---- Watchlists tab -------------------------------------------------------
+var WL_EXPANDED = null;
+var DEFAULT_INDICATORS = {sma:true, ema:false, rsi:true, bollinger:false, macd:true, vwap:false};
+
+function activeListKey(){
+  var override = lsGet("activeWatchlist", null);
+  if (override && STATE.watchlists.lists[override]) { lsSet("activeWatchlist", null); return override; }
+  var keys = Object.keys(STATE.watchlists.lists);
+  if (STATE.watchlists.active && STATE.watchlists.lists[STATE.watchlists.active]) return STATE.watchlists.active;
+  return keys[0];
+}
+
+RENDERERS.watchlists = function(root){
+  var activeKey = activeListKey();
+  STATE.watchlists.active = activeKey;
+
+  root.innerHTML =
+    "<div class='card'>" +
+      "<div class='flex-between'>" +
+        "<div><h2>Watchlists</h2><p class='muted small'>Your named baskets. Clone a preset below or build your own.</p></div>" +
+        "<div class='row'><input id='wl-new-name' type='text' placeholder='New list name' style='width:180px'><button class='btn small' id='wl-new-btn'>New list</button></div>" +
+      "</div>" +
+      "<div class='row' id='wl-list-chips' style='margin-top:14px'></div>" +
+    "</div>" +
+    "<div class='card'>" +
+      "<h3>30+ Sector Presets</h3>" +
+      "<div class='row' id='wl-preset-chips'></div>" +
+    "</div>" +
+    "<div id='wl-active-panel'></div>" +
+    "<div class='card'>" +
+      "<h3>Source Transparency</h3>" +
+      "<p class='muted small'>These preset lists are hand-curated starting points -- large/mid-cap US-listed names with pure-play or near-pure-play exposure to each theme. They are not investment advice, not optimized, and not exhaustive. Prices are best-effort from Yahoo Finance / Stooq via public CORS proxies and can lag or fall back to a synthetic series if every proxy is unavailable.</p>" +
+    "</div>";
+
+  $("#wl-new-btn").addEventListener("click", function(){
+    var name = ($("#wl-new-name").value||"").trim();
+    if (!name) return;
+    var key = name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"") || uid();
+    STATE.watchlists.lists[key] = {label:name, desc:"", tickers:[], indicators: Object.assign({}, DEFAULT_INDICATORS)};
+    STATE.watchlists.active = key;
+    saveWatchlists();
+    showTab("watchlists");
+  });
+
+  renderListChips();
+  renderPresetChips();
+  renderActiveListPanel();
+};
+
+function renderListChips(){
+  var root = $("#wl-list-chips");
+  var lists = STATE.watchlists.lists;
+  var keys = Object.keys(lists);
+  if (!keys.length){ root.innerHTML = "<span class='muted small'>No lists yet -- clone a preset below to get started.</span>"; return; }
+  root.innerHTML = keys.map(function(k){
+    var active = k === STATE.watchlists.active;
+    return "<span class='chip" + (active?" active":"") + "' data-list-key='" + esc(k) + "'>" + esc(lists[k].label||k) + "</span>";
+  }).join("");
+  $all("[data-list-key]", root).forEach(function(chip){
+    chip.addEventListener("click", function(){
+      STATE.watchlists.active = chip.dataset.listKey;
+      saveWatchlists();
+      WL_EXPANDED = null;
+      showTab("watchlists");
+    });
+  });
+}
+
+function renderPresetChips(){
+  var root = $("#wl-preset-chips");
+  root.innerHTML = STATE.presets.map(function(p){
+    return "<span class='chip' data-preset-key='" + esc(p.key) + "' title='" + esc(p.desc) + "'>" + esc(p.label) + "</span>";
+  }).join("");
+  $all("[data-preset-key]", root).forEach(function(chip){
+    chip.addEventListener("click", function(){
+      var preset = STATE.presets.filter(function(p){ return p.key === chip.dataset.presetKey; })[0];
+      if (!preset) return;
+      STATE.watchlists.lists[preset.key] = {
+        label: preset.label, desc: preset.desc, tickers: preset.tickers.slice(),
+        indicators: Object.assign({}, DEFAULT_INDICATORS)
+      };
+      STATE.watchlists.active = preset.key;
+      saveWatchlists();
+      WL_EXPANDED = null;
+      showTab("watchlists");
+    });
+  });
+}
+
+function renderActiveListPanel(){
+  var root = $("#wl-active-panel");
+  var key = STATE.watchlists.active;
+  var list = STATE.watchlists.lists[key];
+  if (!list){ root.innerHTML = ""; return; }
+  list.indicators = list.indicators || Object.assign({}, DEFAULT_INDICATORS);
+
+  root.innerHTML =
+    "<div class='card'>" +
+      "<div class='flex-between'>" +
+        "<div><h2>" + esc(list.label||key) + "</h2>" + (list.desc ? "<p class='muted small'>" + esc(list.desc) + "</p>" : "") + "</div>" +
+        "<div class='row'><input id='wl-add-ticker' type='text' placeholder='Add ticker' style='width:120px;text-transform:uppercase'><button class='btn small' id='wl-add-btn'>Add</button></div>" +
+      "</div>" +
+      "<div class='row' style='margin-top:10px' id='wl-indicator-toggles'></div>" +
+      "<div style='margin-top:14px' id='wl-table-wrap'><p class='muted small'>Loading quotes...</p></div>" +
+      "<div id='wl-chart-wrap'></div>" +
+    "</div>";
+
+  ["sma","ema","rsi","bollinger","macd","vwap"].forEach(function(ind){
+    var wrap = document.createElement("label");
+    wrap.className = "chip" + (list.indicators[ind] ? " active" : "");
+    wrap.style.cursor = "pointer";
+    wrap.textContent = ind.toUpperCase();
+    wrap.addEventListener("click", function(){
+      list.indicators[ind] = !list.indicators[ind];
+      saveWatchlists();
+      renderActiveListPanel();
+    });
+    $("#wl-indicator-toggles").appendChild(wrap);
+  });
+
+  $("#wl-add-btn").addEventListener("click", function(){
+    var t = ($("#wl-add-ticker").value||"").trim().toUpperCase();
+    if (!t) return;
+    if (list.tickers.indexOf(t) === -1) list.tickers.push(t);
+    saveWatchlists();
+    renderActiveListPanel();
+  });
+
+  renderWatchlistTable(list);
+}
+
+function renderWatchlistTable(list){
+  var wrap = $("#wl-table-wrap");
+  if (!list.tickers.length){ wrap.innerHTML = "<p class='muted small'>No tickers yet -- add one above.</p>"; return; }
+
+  Promise.all(list.tickers.map(function(t){ return getSeries(t).then(function(s){ return {ticker:t, series:s}; }); }))
+    .then(function(results){
+      var rows = results.map(function(r){
+        var s = r.series;
+        var closes = s.closes, dates = s.dates, volumes = s.volumes;
+        var price = closes[closes.length-1];
+        var chg = closes.length>1 ? ((price/closes[closes.length-2])-1)*100 : null;
+        var rsiSeries = IND.rsi(dates, closes, 14);
+        var mfiSeries = IND.mfi(dates, closes, volumes, 14);
+        var cmfSeries = IND.cmf(dates, closes, volumes, 21);
+        var status = IND.moneyFlowStatus(cmfSeries, 21);
+        var rsiVal = rsiSeries[rsiSeries.length-1].p;
+        var mfiVal = mfiSeries[mfiSeries.length-1].p;
+        return {ticker:r.ticker, price:price, chg:chg, rsi:rsiVal, mfi:mfiVal, status:status, synthetic:s.synthetic};
+      });
+      var html = "<table><thead><tr><th>Ticker</th><th>Price</th><th>Chg</th><th>RSI(14)</th><th>MFI(14)</th><th>Money Flow</th><th></th></tr></thead><tbody>";
+      rows.forEach(function(row){
+        html += "<tr class='clickable' data-row-ticker='" + esc(row.ticker) + "'>" +
+          "<td>" + esc(row.ticker) + (row.synthetic ? " <span class='tag'>sample data</span>" : "") + "</td>" +
+          "<td>" + fmtPrice(row.price) + "</td>" +
+          "<td class='" + pctClass(row.chg) + "'>" + fmtPct(row.chg) + "</td>" +
+          "<td>" + fmtNum(row.rsi, 1) + "</td>" +
+          "<td>" + fmtNum(row.mfi, 1) + "</td>" +
+          "<td><span class='pill " + row.status.cls + "'>" + row.status.label + "</span></td>" +
+          "<td><button class='btn small ghost' data-remove-ticker='" + esc(row.ticker) + "'>Remove</button></td>" +
+        "</tr>";
+      });
+      html += "</tbody></table>";
+      wrap.innerHTML = html;
+
+      $all("[data-remove-ticker]", wrap).forEach(function(b){
+        b.addEventListener("click", function(e){
+          e.stopPropagation();
+          list.tickers = list.tickers.filter(function(t){ return t !== b.dataset.removeTicker; });
+          saveWatchlists();
+          renderActiveListPanel();
+        });
+      });
+      $all("[data-row-ticker]", wrap).forEach(function(tr){
+        tr.addEventListener("click", function(){
+          WL_EXPANDED = (WL_EXPANDED === tr.dataset.rowTicker) ? null : tr.dataset.rowTicker;
+          renderWatchlistChart(list);
+        });
+      });
+
+      renderWatchlistChart(list);
+    })
+    .catch(function(e){
+      console.error("GMR: watchlist table failed", e);
+      wrap.innerHTML = "<p class='muted small'>Could not load quotes right now.</p>";
+    });
+}
+
+function renderWatchlistChart(list){
+  var wrap = $("#wl-chart-wrap");
+  if (!WL_EXPANDED || list.tickers.indexOf(WL_EXPANDED) === -1){ wrap.innerHTML = ""; return; }
+  var ticker = WL_EXPANDED;
+  wrap.innerHTML =
+    "<div class='section-title'>" + esc(ticker) + " chart</div>" +
+    "<div class='chart-wrap'><canvas id='wl-price-canvas'></canvas></div>" +
+    "<div class='chart-wrap small' id='wl-osc-wrap'><canvas id='wl-osc-canvas'></canvas></div>";
+
+  getSeries(ticker).then(function(s){
+    var ind = list.indicators;
+    var datasets = [{ label:ticker, data:s.closes, borderColor:"#e7edf7", borderWidth:1.6, pointRadius:0, tension:.1 }];
+    if (ind.sma) datasets.push({ label:"SMA20", data: IND.sma(s.dates, s.closes, 20).map(function(x){return x.p;}), borderColor:"#4fd1c5", pointRadius:0, borderWidth:1.2, tension:.1 });
+    if (ind.ema) datasets.push({ label:"EMA20", data: IND.ema(s.dates, s.closes, 20).map(function(x){return x.p;}), borderColor:"#f6ad55", pointRadius:0, borderWidth:1.2, tension:.1 });
+    if (ind.vwap) datasets.push({ label:"VWAP", data: IND.vwap(s.dates, s.closes, s.volumes).map(function(x){return x.p;}), borderColor:"#5b8cff", pointRadius:0, borderWidth:1.2, tension:.1 });
+    if (ind.bollinger){
+      var b = IND.bollinger(s.dates, s.closes, 20, 2);
+      datasets.push({ label:"BB Upper", data:b.upper.map(function(x){return x.p;}), borderColor:"#93a2bb", borderDash:[4,3], pointRadius:0, borderWidth:1 });
+      datasets.push({ label:"BB Lower", data:b.lower.map(function(x){return x.p;}), borderColor:"#93a2bb", borderDash:[4,3], pointRadius:0, borderWidth:1 });
+    }
+    new Chart($("#wl-price-canvas").getContext("2d"), {
+      type:"line", data:{ labels:s.dates, datasets:datasets },
+      options:{ maintainAspectRatio:false, scales:{ x:{ ticks:{color:"#93a2bb", maxTicksLimit:8}, grid:{color:"#1b2536"} }, y:{ ticks:{color:"#93a2bb"}, grid:{color:"#1b2536"} } }, plugins:{ legend:{ labels:{color:"#93a2bb", boxWidth:12} } } }
+    });
+
+    var oscWrap = $("#wl-osc-wrap");
+    if (ind.macd){
+      var m = IND.macd(s.dates, s.closes);
+      new Chart($("#wl-osc-canvas").getContext("2d"), {
+        type:"line",
+        data:{ labels:s.dates, datasets:[
+          { label:"MACD", data:m.line.map(function(x){return x.p;}), borderColor:"#4fd1c5", pointRadius:0, borderWidth:1.2 },
+          { label:"Signal", data:m.signal.map(function(x){return x.p;}), borderColor:"#f6ad55", pointRadius:0, borderWidth:1.2 }
+        ]},
+        options:{ maintainAspectRatio:false, scales:{ x:{ ticks:{color:"#93a2bb", maxTicksLimit:8}, grid:{color:"#1b2536"} }, y:{ ticks:{color:"#93a2bb"}, grid:{color:"#1b2536"} } }, plugins:{ legend:{ labels:{color:"#93a2bb", boxWidth:12} } } }
+      });
+    } else if (ind.rsi){
+      var r = IND.rsi(s.dates, s.closes, 14);
+      new Chart($("#wl-osc-canvas").getContext("2d"), {
+        type:"line",
+        data:{ labels:s.dates, datasets:[{ label:"RSI(14)", data:r.map(function(x){return x.p;}), borderColor:"#a78bfa", pointRadius:0, borderWidth:1.2 }] },
+        options:{ maintainAspectRatio:false, scales:{ x:{ ticks:{color:"#93a2bb", maxTicksLimit:8}, grid:{color:"#1b2536"} }, y:{ min:0, max:100, ticks:{color:"#93a2bb"}, grid:{color:"#1b2536"} } }, plugins:{ legend:{ labels:{color:"#93a2bb", boxWidth:12} } } }
+      });
+    } else {
+      oscWrap.innerHTML = "<p class='muted small'>Toggle RSI or MACD above to see an oscillator pane.</p>";
+    }
+  });
+}
+"""
+
+APP_JS = JS_OPEN + JS_CORE + JS_PROXY + JS_ROUTER + JS_DASHBOARD + JS_WATCHLISTS + JS_CLOSE
 
 
 if __name__ == "__main__":
