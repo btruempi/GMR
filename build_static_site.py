@@ -1525,7 +1525,82 @@ function renderOverlayPanels(dates, composite){
 }
 """
 
-APP_JS = JS_OPEN + JS_CORE + JS_PROXY + JS_ROUTER + JS_DASHBOARD + JS_WATCHLISTS + JS_COMPANIES + JS_OPTIMIZER + JS_BACKTEST + JS_CLOSE
+JS_UPDATES = r"""
+// ---- Updates tab (catalyst calendar + news feed) ----------------------
+var UP_TYPE = "all";
+var UP_TICKER = "all";
+
+RENDERERS.updates = function(root){
+  var items = (STATE.catalysts||[]).slice().sort(function(a,b){ return b.date < a.date ? -1 : (b.date > a.date ? 1 : 0); });
+  var tickers = Array.from(new Set(items.map(function(i){ return i.ticker; }))).sort();
+
+  root.innerHTML =
+    "<div class='card'>" +
+      "<h2>Updates</h2>" +
+      "<p class='muted small'>Catalyst calendar and news, merged and sorted newest-first.</p>" +
+      "<div class='row'>" +
+        "<span class='chip" + (UP_TYPE==="all"?" active":"") + "' data-type='all'>All</span>" +
+        "<span class='chip" + (UP_TYPE==="catalyst"?" active":"") + "' data-type='catalyst'>Catalysts</span>" +
+        "<span class='chip" + (UP_TYPE==="news"?" active":"") + "' data-type='news'>News</span>" +
+        "<select id='up-ticker-select' style='width:160px;margin-left:10px'>" +
+          "<option value='all'>All tickers</option>" +
+          tickers.map(function(t){ return "<option value='" + esc(t) + "'" + (t===UP_TICKER?" selected":"") + ">" + esc(t) + "</option>"; }).join("") +
+        "</select>" +
+      "</div>" +
+    "</div>" +
+    "<div class='card' id='up-feed'></div>";
+
+  $all("[data-type]", root).forEach(function(b){
+    b.addEventListener("click", function(){ UP_TYPE = b.dataset.type; showTab("updates"); });
+  });
+  $("#up-ticker-select").addEventListener("change", function(e){ UP_TICKER = e.target.value; renderUpdatesFeed(items); });
+
+  renderUpdatesFeed(items);
+};
+
+function renderUpdatesFeed(items){
+  var root = $("#up-feed");
+  var filtered = items.filter(function(i){
+    if (UP_TYPE !== "all" && i.type !== UP_TYPE) return false;
+    if (UP_TICKER !== "all" && i.ticker !== UP_TICKER) return false;
+    return true;
+  });
+  if (!filtered.length){ root.innerHTML = "<p class='muted small'>No items match this filter.</p>"; return; }
+  root.innerHTML = filtered.map(function(i){
+    var isFuture = i.date >= todayISO();
+    return "<div class='row' style='padding:10px 0;border-bottom:1px solid var(--border);align-items:flex-start'>" +
+      "<span class='pill" + (i.type==="catalyst" ? (isFuture ? " up" : "") : "") + "'>" + (i.type==="catalyst"?"Catalyst":"News") + "</span>" +
+      "<div style='flex:1;min-width:200px'>" +
+        "<div><b>" + esc(i.title) + "</b> <span class='tag'>" + esc(i.ticker) + "</span></div>" +
+        "<div class='muted small'>" + esc(i.date) + " -- " + esc(i.summary||"") + "</div>" +
+      "</div>" +
+    "</div>";
+  }).join("");
+}
+"""
+
+JS_PREIPO = r"""
+// ---- Pre-IPO tab -------------------------------------------------------
+RENDERERS.preipo = function(root){
+  var items = STATE.preIpo || [];
+  root.innerHTML =
+    "<div class='card'>" +
+      "<h2>Pre-IPO Watchlist</h2>" +
+      "<p class='muted small'>Private companies worth tracking ahead of a potential listing. Status reflects public reporting and can change quickly.</p>" +
+    "</div>" +
+    "<div class='grid cols-2'>" +
+      items.map(function(c){
+        return "<div class='card'>" +
+          "<div class='flex-between'><h3 style='margin:0;color:var(--text);text-transform:none;font-size:16px'>" + esc(c.name) + "</h3><span class='tag " + esc(c.status) + "'>" + esc(c.status) + "</span></div>" +
+          "<div class='muted small' style='margin-top:4px'>" + esc(c.sector) + "</div>" +
+          "<p class='small' style='margin-top:8px'>" + esc(c.desc) + "</p>" +
+        "</div>";
+      }).join("") +
+    "</div>";
+};
+"""
+
+APP_JS = JS_OPEN + JS_CORE + JS_PROXY + JS_ROUTER + JS_DASHBOARD + JS_WATCHLISTS + JS_COMPANIES + JS_OPTIMIZER + JS_BACKTEST + JS_UPDATES + JS_PREIPO + JS_CLOSE
 
 
 if __name__ == "__main__":
