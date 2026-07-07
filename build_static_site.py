@@ -150,6 +150,7 @@ HTML_TEMPLATE = r"""<!doctype html>
 <script>__CHARTJS__</script>
 <script>
 window.GMR_DATA = __SEED_DATA__;
+window.GMR_DEPLOY_FILES = __DEPLOY_FILES__;
 </script>
 <script>__APP_JS__</script>
 </body>
@@ -166,11 +167,22 @@ def build():
     # raw strings so a stray Python escape can't corrupt the JS output).
     app_js = APP_JS
 
+    # Files the Methodology/Alerts tabs push into the user's repo via the
+    # GitHub API when they turn on scheduled emails / arm alerts. Embedding
+    # via json.dumps (not hand-written JS string literals) sidesteps gotcha
+    # #1 entirely -- Python does the escaping, not a human.
+    deploy_files = {
+        "workflow": load_text(".github/workflows/nri-email.yml"),
+        "sendScript": load_text("scripts/maybe_send_email.py"),
+        "indicators": load_text("scripts/indicators.py"),
+    }
+
     html = (
         HTML_TEMPLATE
         .replace("__CSS__", css)
         .replace("__CHARTJS__", chartjs)
         .replace("__SEED_DATA__", json.dumps(seed))
+        .replace("__DEPLOY_FILES__", json.dumps(deploy_files))
         .replace("__APP_JS__", app_js)
     )
 
@@ -234,17 +246,19 @@ var STATE = {
   alerts: lsGet("alerts", SEED.alerts),
   emailSettings: lsGet("emailSettings", SEED.emailSettings),
   presets: SEED.presets || [],
-  constituents: SEED.constituents || [],
+  constituents: lsGet("constituents", SEED.constituents || []),
   catalysts: SEED.catalysts || [],
   preIpo: SEED.preIpo || [],
   seriesCache: {},
   githubToken: lsGet("githubToken", ""),
-  githubRepo: lsGet("githubRepo", "")
+  githubRepo: lsGet("githubRepo", ""),
+  deployFiles: window.GMR_DEPLOY_FILES || {}
 };
 function saveWatchlists(){ lsSet("watchlists", STATE.watchlists); }
 function saveProfile(){ lsSet("profile", STATE.profile); }
 function saveAlerts(){ lsSet("alerts", STATE.alerts); }
 function saveEmailSettings(){ lsSet("emailSettings", STATE.emailSettings); }
+function saveConstituents(){ lsSet("constituents", STATE.constituents); }
 
 // ---- indicator math (mirrors scripts/indicators.py -- keep in sync) -----
 var IND = {};
@@ -2039,7 +2053,165 @@ function diagnoseSetup(){
 }
 """
 
-APP_JS = JS_OPEN + JS_CORE + JS_PROXY + JS_ROUTER + JS_DASHBOARD + JS_WATCHLISTS + JS_COMPANIES + JS_OPTIMIZER + JS_BACKTEST + JS_UPDATES + JS_PREIPO + JS_PROFILE + JS_GITHUB + JS_ALERTS + JS_CLOSE
+JS_METHODOLOGY = r"""
+// ---- Methodology tab ----------------------------------------------------
+var METH_MODE = "featured";
+var CADENCE_OPTIONS = ["daily","weekly","monthly","quarterly","yearly","off"];
+
+RENDERERS.methodology = function(root){
+  var wlKeys = Object.keys(STATE.watchlists.lists);
+  root.innerHTML =
+    "<div class='card'>" +
+      "<h2>Methodology</h2>" +
+      "<label>Show methodology for</label>" +
+      "<select id='meth-select'>" +
+        "<option value='featured'" + (METH_MODE==="featured"?" selected":"") + ">Featured index</option>" +
+        wlKeys.map(function(k){ return "<option value='wl:" + esc(k) + "'" + (METH_MODE==="wl:"+k?" selected":"") + ">Watchlist: " + esc(STATE.watchlists.lists[k].label||k) + "</option>"; }).join("") +
+      "</select>" +
+    "</div>" +
+    "<div id='meth-body'></div>";
+
+  $("#meth-select").addEventListener("change", function(e){ METH_MODE = e.target.value; renderMethodologyBody(); });
+  renderMethodologyBody();
+};
+
+function renderMethodologyBody(){
+  var root = $("#meth-body");
+  if (METH_MODE === "featured"){ renderFeaturedMethodology(root); return; }
+  var key = METH_MODE.replace("wl:", "");
+  var list = STATE.watchlists.lists[key];
+  if (!list){ root.innerHTML = "<div class='card'><p class='muted small'>List not found.</p></div>"; return; }
+  root.innerHTML =
+    "<div class='card'>" +
+      "<h3>" + esc(list.label||key) + "</h3>" +
+      "<p class='muted small'>This is a hand-built list, no formal methodology. It is a flat collection of tickers -- add or remove them from the Watchlists tab.</p>" +
+      "<div class='row'>" + list.tickers.map(function(t){ return "<span class='chip'>" + esc(t) + "</span>"; }).join("") + "</div>" +
+    "</div>";
+}
+
+function renderFeaturedMethodology(root){
+  var cons = STATE.constituents;
+  var totalWeight = cons.reduce(function(a,c){ return a+c.weight; }, 0);
+  var tier1 = cons.filter(function(c){ return c.tier===1; });
+  var tier2 = cons.filter(function(c){ return c.tier!==1; });
+
+  function tierTable(list, tierLabel){
+    return "<div class='section-title'>" + tierLabel + "</div><table><thead><tr><th>Ticker</th><th>Name</th><th>Sector</th><th>Weight %</th><th></th></tr></thead><tbody>" +
+      list.map(function(c){
+        return "<tr><td>" + esc(c.ticker) + "</td><td>" + esc(c.name) + "</td><td class='muted'>" + esc(c.sector) + "</td>" +
+          "<td><input data-weight='" + esc(c.ticker) + "' type='number' step='0.1' value='" + c.weight + "' style='width:80px'></td>" +
+          "<td><button class='btn small ghost' data-remove-con='" + esc(c.ticker) + "'>Remove</button></td></tr>";
+      }).join("") + "</tbody></table>";
+  }
+
+  root.innerHTML =
+    "<div class='card'>" +
+      "<h3>Tiered Weights</h3>" +
+      "<p class='muted small'>Total allocated weight: " + fmtNum(totalWeight,1) + "% (should sum to 100%). Tier 1 names are core holdings; Tier 2 are satellite/emerging exposure.</p>" +
+      tierTable(tier1, "Tier 1 -- Core") +
+      tierTable(tier2, "Tier 2 -- Satellite") +
+      "<div class='section-title'>Add Constituent</div>" +
+      "<div class='grid cols-4'>" +
+        "<div><label>Ticker</label><input id='con-ticker' type='text' style='text-transform:uppercase'></div>" +
+        "<div><label>Name</label><input id='con-name' type='text'></div>" +
+        "<div><label>Sector</label><input id='con-sector' type='text'></div>" +
+        "<div><label>Weight %</label><input id='con-weight' type='number' value='5'></div>" +
+      "</div>" +
+      "<div class='cta-row'><button class='btn secondary' id='con-add-btn'>Add constituent</button><button class='btn' id='con-save-btn'>Save weights</button><span id='con-saved' class='footer-note'></span></div>" +
+    "</div>" +
+    "<div class='card' id='meth-email-card'></div>";
+
+  $all("[data-remove-con]", root).forEach(function(b){
+    b.addEventListener("click", function(){
+      STATE.constituents = STATE.constituents.filter(function(c){ return c.ticker !== b.dataset.removeCon; });
+      saveConstituents();
+      renderFeaturedMethodology(root);
+    });
+  });
+  $("#con-add-btn").addEventListener("click", function(){
+    var ticker = ($("#con-ticker").value||"").trim().toUpperCase();
+    if (!ticker) return;
+    STATE.constituents.push({
+      ticker:ticker, name: $("#con-name").value.trim()||ticker, sector: $("#con-sector").value.trim()||"Uncategorized",
+      tier:2, weight: parseFloat($("#con-weight").value)||1
+    });
+    saveConstituents();
+    renderFeaturedMethodology(root);
+  });
+  $("#con-save-btn").addEventListener("click", function(){
+    $all("[data-weight]", root).forEach(function(inp){
+      var c = STATE.constituents.filter(function(x){ return x.ticker===inp.dataset.weight; })[0];
+      if (c) c.weight = parseFloat(inp.value)||0;
+    });
+    saveConstituents();
+    $("#con-saved").textContent = "Saved.";
+  });
+
+  renderEmailDigestCard();
+}
+
+function renderEmailDigestCard(){
+  var root = $("#meth-email-card");
+  var es = STATE.emailSettings;
+  root.innerHTML =
+    "<h3>Email Digest Schedule</h3>" +
+    "<div class='row'>" +
+      CADENCE_OPTIONS.map(function(c){
+        return "<label class='chip" + (es.cadence===c?" active":"") + "' data-cadence='" + c + "' style='cursor:pointer'>" + c + "</label>";
+      }).join("") +
+    "</div>" +
+    "<div class='grid cols-2' style='margin-top:12px'>" +
+      "<div><label>Gmail address (used as sender + digest recipient)</label><input id='meth-email' type='email' value='" + esc(es.email||"") + "'></div>" +
+      "<div><label>owner/repo</label><input id='meth-repo' type='text' placeholder='yourname/GMR' value='" + esc(STATE.githubRepo||"") + "'></div>" +
+    "</div>" +
+    "<div class='grid cols-2'>" +
+      "<div><label>GitHub Personal Access Token (repo + workflow scopes)</label><input id='meth-token' type='text' placeholder='ghp_...' value='" + esc(STATE.githubToken||"") + "'></div>" +
+    "</div>" +
+    "<div class='cta-row'><button class='btn' id='meth-turn-on'>Turn on scheduled emails</button><span id='meth-status' class='footer-note'></span></div>";
+
+  $all("[data-cadence]", root).forEach(function(chip){
+    chip.addEventListener("click", function(){
+      STATE.emailSettings.cadence = chip.dataset.cadence;
+      saveEmailSettings();
+      renderEmailDigestCard();
+    });
+  });
+
+  $("#meth-turn-on").addEventListener("click", function(){
+    STATE.emailSettings.email = $("#meth-email").value.trim();
+    STATE.emailSettings.to = STATE.emailSettings.email;
+    saveEmailSettings();
+    STATE.githubRepo = $("#meth-repo").value.trim();
+    STATE.githubToken = $("#meth-token").value.trim();
+    lsSet("githubRepo", STATE.githubRepo);
+    lsSet("githubToken", STATE.githubToken);
+
+    if (!STATE.githubRepo || !STATE.githubToken){
+      $("#meth-status").textContent = "Enter owner/repo and a token first.";
+      return;
+    }
+    var status = $("#meth-status");
+    status.textContent = "Pushing workflow + scripts to your repo...";
+    var files = STATE.deployFiles || {};
+    Promise.all([
+      ghPutFile(".github/workflows/nri-email.yml", files.workflow || "", "GMR: enable scheduled emails"),
+      ghPutFile("scripts/maybe_send_email.py", files.sendScript || "", "GMR: enable scheduled emails"),
+      ghPutFile("scripts/indicators.py", files.indicators || "", "GMR: enable scheduled emails"),
+      ghPutFile("data/email_settings.json", STATE.emailSettings, "GMR: update email settings")
+    ]).then(function(results){
+      var allOk = results.every(function(r){ return r.ok; });
+      status.textContent = allOk
+        ? "Scheduled emails are on. Add the GMAIL_APP_PASSWORD secret in your repo settings, then use Alerts → Send a test alert."
+        : "Something failed -- check the token has repo + workflow scopes and the repo name is correct.";
+    }).catch(function(e){
+      console.error("GMR: turn on scheduled emails failed", e);
+      status.textContent = "Push failed -- see console for details.";
+    });
+  });
+}
+"""
+
+APP_JS = JS_OPEN + JS_CORE + JS_PROXY + JS_ROUTER + JS_DASHBOARD + JS_WATCHLISTS + JS_COMPANIES + JS_OPTIMIZER + JS_BACKTEST + JS_UPDATES + JS_PREIPO + JS_PROFILE + JS_GITHUB + JS_ALERTS + JS_METHODOLOGY + JS_CLOSE
 
 
 if __name__ == "__main__":
