@@ -479,14 +479,19 @@ JS_PROXY = r"""
 // ---- CORS proxy chain ----------------------------------------------------
 // Order matters: cheap/fast proxies first. Health state persists in
 // localStorage so a bad proxy this session stays deprioritized next time.
+// Verified against Yahoo from a GitHub Pages origin (2026-07). The free proxy
+// landscape churns constantly -- corsproxy.io (403), thingproxy (dead), and
+// r.jina.ai (401) all stopped working, so the chain leads with the ones that
+// still return a valid Access-Control-Allow-Origin today and keeps a couple of
+// backups. allorigins is the backbone but throws Cloudflare 5xx under load, so
+// we retry the whole chain once before giving up.
 var PROXIES = [
-  {name:"corsproxy",      build:function(u){ return "https://corsproxy.io/?url=" + encodeURIComponent(u); }},
-  {name:"allorigins-raw", build:function(u){ return "https://api.allorigins.win/raw?url=" + encodeURIComponent(u); }},
   {name:"allorigins-get", build:function(u){ return "https://api.allorigins.win/get?url=" + encodeURIComponent(u); }, wrapped:true},
+  {name:"corssh",         build:function(u){ return "https://proxy.cors.sh/" + u; }},
+  {name:"allorigins-raw", build:function(u){ return "https://api.allorigins.win/raw?url=" + encodeURIComponent(u); }},
   {name:"codetabs",       build:function(u){ return "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u); }},
-  {name:"thingproxy",     build:function(u){ return "https://thingproxy.freeboard.io/fetch/" + u; }},
   {name:"corslol",        build:function(u){ return "https://api.cors.lol/?url=" + encodeURIComponent(u); }},
-  {name:"jina",           build:function(u){ return "https://r.jina.ai/" + u; }}
+  {name:"thingproxy",     build:function(u){ return "https://thingproxy.freeboard.io/fetch/" + u; }}
 ];
 function proxyHealth(){ return lsGet("proxyHealth", {}); }
 function saveProxyHealth(h){ lsSet("proxyHealth", h); }
@@ -510,7 +515,7 @@ function markProxyResult(name, ok){
   saveProxyHealth(health);
 }
 function fetchViaProxies(targetUrl, timeoutMs){
-  timeoutMs = timeoutMs || 9000;
+  timeoutMs = timeoutMs || 7000;
   var list = orderedProxies();
   function tryOne(idx){
     if (idx >= list.length) return Promise.reject(new Error("all proxies exhausted"));
@@ -606,13 +611,27 @@ function getSeries(ticker, range){
   if (STATE.seriesCache[cacheKey]) return Promise.resolve(STATE.seriesCache[cacheKey]);
   var yahooUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(ticker) + "?range=" + range + "&interval=1d";
   var stooqUrl = "https://stooq.com/q/d/l/?s=" + encodeURIComponent(ticker.toLowerCase()) + ".us&i=d";
-  return fetchViaProxies(yahooUrl)
-    .then(function(txt){ return parseYahooChart(txt); })
+
+  // One attempt = full proxy chain against Yahoo, then Stooq as a backup source.
+  function attempt(){
+    return fetchViaProxies(yahooUrl)
+      .then(function(txt){ return parseYahooChart(txt); })
+      .catch(function(){
+        return fetchViaProxies(stooqUrl).then(function(txt){ return parseStooqCsv(txt); });
+      })
+      .then(function(series){
+        if (!series.closes || series.closes.length < 5) throw new Error("no data");
+        return series;
+      });
+  }
+
+  // allorigins throws Cloudflare 5xx under load, so retry the whole chain once
+  // (short backoff) before accepting the synthetic fallback.
+  return attempt()
     .catch(function(){
-      return fetchViaProxies(stooqUrl).then(function(txt){ return parseStooqCsv(txt); });
+      return new Promise(function(res){ setTimeout(res, 700); }).then(attempt);
     })
     .then(function(series){
-      if (!series.closes || series.closes.length < 5) throw new Error("no data");
       STATE.seriesCache[cacheKey] = series;
       return series;
     })
