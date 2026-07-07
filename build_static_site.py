@@ -155,12 +155,29 @@ footer.sitefoot b{color:var(--text)}
 td.caret{color:var(--muted);width:22px;text-align:center;user-select:none}
 tr.row-open{background:var(--panel2)}
 tr.row-open td.caret{color:var(--accent)}
+.topsearch-wrap{position:relative}
 .topsearch{display:flex;align-items:center;gap:0;background:var(--bg2);border:1px solid var(--border);border-radius:8px;overflow:hidden}
-.topsearch input{border:none;background:none;width:190px;padding:7px 10px;font-size:13px;color:var(--text)}
+.topsearch input{border:none;background:none;width:210px;padding:7px 10px;font-size:13px;color:var(--text)}
 .topsearch input:focus{outline:none}
 .topsearch button{border:none;background:var(--panel2);color:var(--text);padding:7px 11px;cursor:pointer;font-size:13px}
 .topsearch button:hover{background:var(--accent);color:#04211d}
-@media(max-width:900px){ .topsearch{order:3} .topsearch input{width:130px} }
+@media(max-width:900px){ .topsearch-wrap{order:3} .topsearch input{width:150px} }
+.search-results{position:absolute;top:calc(100% + 4px);right:0;width:340px;max-width:80vw;background:var(--panel);
+  border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.5);z-index:100;
+  max-height:60vh;overflow-y:auto;display:none}
+.search-results.open{display:block}
+.sr-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer}
+.sr-item:last-child{border-bottom:none}
+.sr-item:hover,.sr-item.active{background:var(--panel2)}
+.sr-main{flex:1;min-width:0}
+.sr-sym{font-weight:700;font-size:13.5px}
+.sr-name{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-exch{font-size:10.5px;color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+.sr-add{border:1px solid var(--border);background:var(--bg2);color:var(--accent);border-radius:6px;
+  padding:4px 8px;font-size:12px;cursor:pointer;white-space:nowrap;font-weight:700}
+.sr-add:hover{background:var(--accent);color:#04211d;border-color:var(--accent)}
+.sr-add.added{color:var(--up);border-color:var(--up)}
+.sr-msg{padding:10px 12px;color:var(--muted);font-size:12.5px}
 .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0 26px}
 @media(max-width:900px){ .stats-grid{grid-template-columns:repeat(2,1fr)} }
 @media(max-width:560px){ .stats-grid{grid-template-columns:1fr} }
@@ -189,11 +206,13 @@ HTML_TEMPLATE = r"""<!doctype html>
   <div class="topbar-inner">
     <div class="brand">Growth<span>Markets</span> Research</div>
     <span class="mkt-status" id="mkt-status"><span class="dot"></span><span id="mkt-status-text">Market</span></span>
-    <form class="topsearch" id="topsearch" autocomplete="off">
-      <input id="topsearch-input" type="text" placeholder="Search ticker or company" list="topsearch-list" aria-label="Search ticker or company">
-      <datalist id="topsearch-list"></datalist>
-      <button type="submit" aria-label="Search">&#128269;</button>
-    </form>
+    <div class="topsearch-wrap" id="topsearch-wrap">
+      <form class="topsearch" id="topsearch" autocomplete="off">
+        <input id="topsearch-input" type="text" placeholder="Search ticker or company" aria-label="Search ticker or company">
+        <button type="submit" aria-label="Search">&#128269;</button>
+      </form>
+      <div class="search-results" id="search-results"></div>
+    </div>
     <nav class="tabs" id="tabnav"></nav>
   </div>
 </header>
@@ -793,27 +812,113 @@ function updateMarketStatus(){
   txt.textContent = open ? "Market open" : "Market closed";
 }
 
+// Local universe (ticker + name) from constituents + presets, for instant
+// results and as a fallback when the live search API is unreachable.
+function localSearchIndex(){
+  var seen = {}, out = [];
+  (STATE.constituents||[]).forEach(function(c){ if(!seen[c.ticker]){ seen[c.ticker]=1; out.push({symbol:c.ticker, name:c.name, exch:""}); } });
+  (STATE.presets||[]).forEach(function(p){ (p.tickers||[]).forEach(function(t){ if(!seen[t]){ seen[t]=1; out.push({symbol:t, name:"", exch:""}); } }); });
+  return out;
+}
+function localSearch(q){
+  q = q.toLowerCase();
+  return localSearchIndex().filter(function(r){
+    return r.symbol.toLowerCase().indexOf(q) !== -1 || (r.name && r.name.toLowerCase().indexOf(q) !== -1);
+  }).slice(0, 8);
+}
+// Live search via Yahoo's public search endpoint (no auth), through the CORS
+// proxy chain. Resolves ticker OR company name to matching symbols.
+function liveSearch(q){
+  var url = "https://query2.finance.yahoo.com/v1/finance/search?q=" + encodeURIComponent(q) + "&quotesCount=8&newsCount=0";
+  return fetchViaProxies(url, 6000).then(function(txt){
+    var quotes = (JSON.parse(txt).quotes) || [];
+    return quotes.filter(function(x){
+      return x.symbol && (x.quoteType === "EQUITY" || x.quoteType === "ETF");
+    }).map(function(x){
+      return { symbol: x.symbol, name: x.shortname || x.longname || "", exch: x.exchDisp || "" };
+    });
+  });
+}
+
 function wireTopSearch(){
   var form = document.getElementById("topsearch");
   var input = document.getElementById("topsearch-input");
-  var list = document.getElementById("topsearch-list");
-  if (!form || !input) return;
-  // autocomplete options from constituents + presets (symbol + name)
-  var seen = {}, opts = [];
-  (STATE.constituents||[]).forEach(function(c){ if(!seen[c.ticker]){ seen[c.ticker]=1; opts.push([c.ticker, c.name]); } });
-  (STATE.presets||[]).forEach(function(p){ (p.tickers||[]).forEach(function(t){ if(!seen[t]){ seen[t]=1; opts.push([t, ""]); } }); });
-  if (list) list.innerHTML = opts.map(function(o){ return "<option value='" + esc(o[0]) + "'>" + esc(o[1]||o[0]) + "</option>"; }).join("");
+  var box = document.getElementById("search-results");
+  var wrap = document.getElementById("topsearch-wrap");
+  if (!form || !input || !box) return;
+  var timer = null, seq = 0, activeIdx = -1, results = [];
+
+  function close(){ box.className = "search-results"; box.innerHTML = ""; activeIdx = -1; }
+  function openCompany(sym){
+    CO_TICKER = sym.toUpperCase(); lsSet("companiesTicker", CO_TICKER);
+    input.value = ""; close(); input.blur();
+    showTab("companies");
+  }
+  function addToWatchlist(sym, btn){
+    var key = STATE.watchlists.active || Object.keys(STATE.watchlists.lists)[0];
+    if (!key){ alert("Create a watchlist first on the Watchlists tab."); return; }
+    var list = STATE.watchlists.lists[key];
+    sym = sym.toUpperCase();
+    if (list.tickers.indexOf(sym) === -1) list.tickers.push(sym);
+    saveWatchlists();
+    if (btn){ btn.textContent = "Added"; btn.className = "sr-add added"; }
+  }
+  function render(items, note){
+    results = items || [];
+    if (note){ box.innerHTML = "<div class='sr-msg'>" + esc(note) + "</div>"; box.className = "search-results open"; return; }
+    if (!results.length){ box.innerHTML = "<div class='sr-msg'>No matches.</div>"; box.className = "search-results open"; return; }
+    box.innerHTML = results.map(function(r, i){
+      return "<div class='sr-item" + (i===activeIdx?" active":"") + "' data-i='" + i + "'>" +
+        "<div class='sr-main' data-open='" + esc(r.symbol) + "'>" +
+          "<div class='sr-sym'>" + esc(r.symbol) + (r.exch?" <span class='sr-exch'>" + esc(r.exch) + "</span>":"") + "</div>" +
+          (r.name ? "<div class='sr-name'>" + esc(r.name) + "</div>" : "") +
+        "</div>" +
+        "<button class='sr-add' data-add='" + esc(r.symbol) + "'>+ Watchlist</button>" +
+      "</div>";
+    }).join("");
+    box.className = "search-results open";
+    $all("[data-open]", box).forEach(function(el){ el.addEventListener("click", function(){ openCompany(el.dataset.open); }); });
+    $all("[data-add]", box).forEach(function(b){ b.addEventListener("click", function(e){ e.stopPropagation(); addToWatchlist(b.dataset.add, b); }); });
+  }
+  function doSearch(q){
+    var mySeq = ++seq;
+    // instant local results first
+    var loc = localSearch(q);
+    render(loc.length ? loc : null, loc.length ? null : "Searching...");
+    liveSearch(q).then(function(items){
+      if (mySeq !== seq) return; // a newer query superseded this one
+      // merge: live results first, then any local-only symbols
+      var syms = {}; var merged = [];
+      items.forEach(function(r){ if(!syms[r.symbol]){ syms[r.symbol]=1; merged.push(r); } });
+      loc.forEach(function(r){ if(!syms[r.symbol]){ syms[r.symbol]=1; merged.push(r); } });
+      render(merged.slice(0, 10));
+    }).catch(function(){
+      if (mySeq !== seq) return;
+      render(loc, loc.length ? null : "Search unavailable -- type an exact ticker and press Enter.");
+    });
+  }
+
+  input.addEventListener("input", function(){
+    var q = input.value.trim();
+    activeIdx = -1;
+    if (timer) clearTimeout(timer);
+    if (q.length < 1){ close(); return; }
+    timer = setTimeout(function(){ doSearch(q); }, 220);
+  });
+  input.addEventListener("keydown", function(e){
+    if (!results.length) return;
+    if (e.key === "ArrowDown"){ e.preventDefault(); activeIdx = Math.min(results.length-1, activeIdx+1); render(results); }
+    else if (e.key === "ArrowUp"){ e.preventDefault(); activeIdx = Math.max(0, activeIdx-1); render(results); }
+    else if (e.key === "Escape"){ close(); }
+  });
   form.addEventListener("submit", function(e){
     e.preventDefault();
+    if (activeIdx >= 0 && results[activeIdx]){ openCompany(results[activeIdx].symbol); return; }
+    if (results.length){ openCompany(results[0].symbol); return; }
     var raw = (input.value||"").trim();
-    if (!raw) return;
-    // accept "AAPL" or "AAPL - Apple"; take the leading symbol token
-    var sym = raw.split(/[\s-]/)[0].toUpperCase();
-    CO_TICKER = sym; lsSet("companiesTicker", sym);
-    input.value = "";
-    input.blur();
-    showTab("companies");
+    if (raw) openCompany(raw.split(/[\s-]/)[0]);
   });
+  document.addEventListener("click", function(e){ if (wrap && !wrap.contains(e.target)) close(); });
 }
 
 function init(){
