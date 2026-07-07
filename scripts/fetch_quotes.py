@@ -17,12 +17,98 @@ import os
 import ssl
 import time
 import urllib.request
+import urllib.parse
+import http.cookiejar
 from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.join(ROOT, "data", "quotes")
 RANGE = "2y"
 SLEEP = 0.25  # be polite to Yahoo, avoid rate limiting
+UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+
+
+def yahoo_session():
+    """Yahoo's fundamentals endpoints (v10 quoteSummary) require a cookie + a
+    matching crumb. Grab a cookie from fc.yahoo.com, then fetch the crumb.
+    Returns (opener, crumb) or (None, None) if the handshake fails."""
+    try:
+        cj = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(cj),
+            urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+        opener.addheaders = [("User-Agent", UA)]
+        try:
+            opener.open("https://fc.yahoo.com", timeout=15)
+        except Exception:
+            pass  # returns 404 but still sets the cookie
+        crumb = opener.open(
+            "https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=15
+        ).read().decode("utf-8").strip()
+        if crumb and "<" not in crumb:
+            return opener, crumb
+    except Exception as e:
+        print(f"[GMR] Crumb handshake failed ({e}); fundamentals will be skipped.")
+    return None, None
+
+
+def _raw(node):
+    if isinstance(node, dict):
+        return node.get("raw", node.get("fmt"))
+    return node
+
+
+def fetch_fundamentals(opener, crumb, ticker):
+    """Returns a flat dict of fundamentals, or {} on any failure."""
+    if not opener or not crumb:
+        return {}
+    modules = "price,summaryDetail,defaultKeyStatistics,assetProfile,financialData,calendarEvents"
+    url = ("https://query2.finance.yahoo.com/v10/finance/quoteSummary/"
+           + ticker + "?modules=" + modules + "&crumb=" + urllib.parse.quote(crumb))
+    try:
+        data = json.loads(opener.open(url, timeout=15).read().decode("utf-8"))
+        r = data["quoteSummary"]["result"][0]
+    except Exception:
+        return {}
+    sd = r.get("summaryDetail", {}) or {}
+    pr = r.get("price", {}) or {}
+    ks = r.get("defaultKeyStatistics", {}) or {}
+    ap = r.get("assetProfile", {}) or {}
+    fd = r.get("financialData", {}) or {}
+    ce = r.get("calendarEvents", {}) or {}
+    earnings = ((ce.get("earnings") or {}).get("earningsDate") or [])
+    earnings_ts = _raw(earnings[0]) if earnings else None
+    return {
+        "name": pr.get("longName") or pr.get("shortName") or ticker,
+        "exchange": pr.get("exchangeName"),
+        "currency": pr.get("currency"),
+        "marketCap": _raw(pr.get("marketCap")) or _raw(sd.get("marketCap")),
+        "previousClose": _raw(sd.get("previousClose")),
+        "open": _raw(sd.get("open")),
+        "bid": _raw(sd.get("bid")), "ask": _raw(sd.get("ask")),
+        "dayLow": _raw(sd.get("dayLow")), "dayHigh": _raw(sd.get("dayHigh")),
+        "volume": _raw(sd.get("volume")),
+        "avgVolume": _raw(sd.get("averageVolume")),
+        "fiftyTwoWeekLow": _raw(sd.get("fiftyTwoWeekLow")),
+        "fiftyTwoWeekHigh": _raw(sd.get("fiftyTwoWeekHigh")),
+        "beta": _raw(sd.get("beta")) or _raw(ks.get("beta")),
+        "trailingPE": _raw(sd.get("trailingPE")),
+        "forwardPE": _raw(sd.get("forwardPE")),
+        "trailingEps": _raw(ks.get("trailingEps")),
+        "forwardEps": _raw(ks.get("forwardEps")),
+        "priceToBook": _raw(ks.get("priceToBook")),
+        "sharesOutstanding": _raw(ks.get("sharesOutstanding")),
+        "dividendRate": _raw(sd.get("dividendRate")),
+        "dividendYield": _raw(sd.get("dividendYield")),
+        "exDividendDate": _raw(sd.get("exDividendDate")),
+        "targetMeanPrice": _raw(fd.get("targetMeanPrice")),
+        "earningsDate": earnings_ts,
+        "sector": ap.get("sector"),
+        "industry": ap.get("industry"),
+        "website": ap.get("website"),
+        "employees": ap.get("fullTimeEmployees"),
+        "summary": (ap.get("longBusinessSummary") or "")[:900],
+    }
 
 
 def _load(rel_path, default):
@@ -89,25 +175,33 @@ def fetch_yahoo(ticker):
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     tickers = collect_tickers()
-    ok, failed = 0, []
+    ok, failed, fund_ok = 0, [], 0
     updated = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    opener, crumb = yahoo_session()
+    print(f"[GMR] Fundamentals session: {'OK' if crumb else 'unavailable (OHLCV only)'}")
     for i, ticker in enumerate(tickers, 1):
         try:
             dates, opens, highs, lows, closes, volumes = fetch_yahoo(ticker)
             if len(closes) < 5:
                 raise ValueError("too few points")
+            fundamentals = fetch_fundamentals(opener, crumb, ticker)
+            if fundamentals:
+                fund_ok += 1
             out = {"ticker": ticker, "updated": updated, "dates": dates,
                    "opens": opens, "highs": highs, "lows": lows,
-                   "closes": closes, "volumes": volumes}
+                   "closes": closes, "volumes": volumes,
+                   "fundamentals": fundamentals}
             safe = ticker.replace("/", "-")
             with open(os.path.join(OUT_DIR, safe + ".json"), "w", encoding="utf-8") as f:
                 json.dump(out, f, separators=(",", ":"))
             ok += 1
-            print(f"[{i}/{len(tickers)}] {ticker}: {len(closes)} bars, last {closes[-1]}")
+            mc = fundamentals.get("marketCap")
+            print(f"[{i}/{len(tickers)}] {ticker}: {len(closes)} bars, last {closes[-1]}" + (f", mktcap {mc}" if mc else ""))
         except Exception as e:
             failed.append(ticker)
             print(f"[{i}/{len(tickers)}] {ticker}: FAILED ({e})")
         time.sleep(SLEEP)
+    print(f"[GMR] Fundamentals baked for {fund_ok}/{len(tickers)} tickers.")
 
     # index file so the site knows which tickers have baked data available
     index = {"updated": updated, "range": RANGE,

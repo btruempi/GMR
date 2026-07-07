@@ -155,6 +155,23 @@ footer.sitefoot b{color:var(--text)}
 td.caret{color:var(--muted);width:22px;text-align:center;user-select:none}
 tr.row-open{background:var(--panel2)}
 tr.row-open td.caret{color:var(--accent)}
+.topsearch{display:flex;align-items:center;gap:0;background:var(--bg2);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.topsearch input{border:none;background:none;width:190px;padding:7px 10px;font-size:13px;color:var(--text)}
+.topsearch input:focus{outline:none}
+.topsearch button{border:none;background:var(--panel2);color:var(--text);padding:7px 11px;cursor:pointer;font-size:13px}
+.topsearch button:hover{background:var(--accent);color:#04211d}
+@media(max-width:900px){ .topsearch{order:3} .topsearch input{width:130px} }
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0 26px}
+@media(max-width:900px){ .stats-grid{grid-template-columns:repeat(2,1fr)} }
+@media(max-width:560px){ .stats-grid{grid-template-columns:1fr} }
+.stat-row{display:flex;justify-content:space-between;gap:12px;padding:9px 2px;border-bottom:1px solid var(--border);font-size:13.5px}
+.stat-row .lbl{color:var(--muted)}
+.stat-row .val{font-weight:700;text-align:right}
+.overview{display:grid;grid-template-columns:1.7fr 1fr;gap:20px}
+@media(max-width:760px){ .overview{grid-template-columns:1fr} }
+.overview .prof{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-content:start}
+.overview .prof .big{font-size:20px;font-weight:800}
+.overview .prof .sub{font-size:12px;color:var(--muted)}
 """
 
 
@@ -172,6 +189,11 @@ HTML_TEMPLATE = r"""<!doctype html>
   <div class="topbar-inner">
     <div class="brand">Growth<span>Markets</span> Research</div>
     <span class="mkt-status" id="mkt-status"><span class="dot"></span><span id="mkt-status-text">Market</span></span>
+    <form class="topsearch" id="topsearch" autocomplete="off">
+      <input id="topsearch-input" type="text" placeholder="Search ticker or company" list="topsearch-list" aria-label="Search ticker or company">
+      <datalist id="topsearch-list"></datalist>
+      <button type="submit" aria-label="Search">&#128269;</button>
+    </form>
     <nav class="tabs" id="tabnav"></nav>
   </div>
 </header>
@@ -256,6 +278,22 @@ function esc(s){
 function fmtPrice(v){ return (v == null || isNaN(v)) ? "--" : "$" + Number(v).toFixed(2); }
 function fmtNum(v, d){ return (v == null || isNaN(v)) ? "--" : Number(v).toFixed(d == null ? 2 : d); }
 function fmtPct(v, d){ return (v == null || isNaN(v)) ? "--" : (v >= 0 ? "+" : "") + Number(v).toFixed(d == null ? 2 : d) + "%"; }
+function fmtBig(v){
+  if (v == null || isNaN(v)) return "--";
+  var a = Math.abs(v);
+  if (a >= 1e12) return (v/1e12).toFixed(2) + "T";
+  if (a >= 1e9) return (v/1e9).toFixed(2) + "B";
+  if (a >= 1e6) return (v/1e6).toFixed(2) + "M";
+  if (a >= 1e3) return (v/1e3).toFixed(2) + "K";
+  return String(Math.round(v));
+}
+function fmtInt(v){ return (v == null || isNaN(v)) ? "--" : Math.round(v).toLocaleString(); }
+function fmtDateTs(ts){
+  if (!ts) return "--";
+  var d = new Date(ts * 1000);
+  if (isNaN(d.getTime())) return "--";
+  return d.toLocaleDateString("en-US", {year:"numeric", month:"short", day:"numeric"});
+}
 function pctClass(v){ return (v == null || isNaN(v)) ? "" : (v >= 0 ? "up" : "down"); }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
 function uid(){ return Math.random().toString(36).slice(2, 10); }
@@ -651,7 +689,7 @@ function getSeries(ticker, range){
       .then(function(r){ if (!r.ok) throw new Error("no baked " + r.status); return r.json(); })
       .then(function(j){
         if (!j.closes || j.closes.length < 5) throw new Error("baked too short");
-        return {dates:j.dates, opens:j.opens, highs:j.highs, lows:j.lows, closes:j.closes, volumes:j.volumes, updated:j.updated};
+        return {dates:j.dates, opens:j.opens, highs:j.highs, lows:j.lows, closes:j.closes, volumes:j.volumes, updated:j.updated, fundamentals:j.fundamentals||null};
       });
   }
 
@@ -755,8 +793,32 @@ function updateMarketStatus(){
   txt.textContent = open ? "Market open" : "Market closed";
 }
 
+function wireTopSearch(){
+  var form = document.getElementById("topsearch");
+  var input = document.getElementById("topsearch-input");
+  var list = document.getElementById("topsearch-list");
+  if (!form || !input) return;
+  // autocomplete options from constituents + presets (symbol + name)
+  var seen = {}, opts = [];
+  (STATE.constituents||[]).forEach(function(c){ if(!seen[c.ticker]){ seen[c.ticker]=1; opts.push([c.ticker, c.name]); } });
+  (STATE.presets||[]).forEach(function(p){ (p.tickers||[]).forEach(function(t){ if(!seen[t]){ seen[t]=1; opts.push([t, ""]); } }); });
+  if (list) list.innerHTML = opts.map(function(o){ return "<option value='" + esc(o[0]) + "'>" + esc(o[1]||o[0]) + "</option>"; }).join("");
+  form.addEventListener("submit", function(e){
+    e.preventDefault();
+    var raw = (input.value||"").trim();
+    if (!raw) return;
+    // accept "AAPL" or "AAPL - Apple"; take the leading symbol token
+    var sym = raw.split(/[\s-]/)[0].toUpperCase();
+    CO_TICKER = sym; lsSet("companiesTicker", sym);
+    input.value = "";
+    input.blur();
+    showTab("companies");
+  });
+}
+
 function init(){
   renderNav();
+  wireTopSearch();
   updateMarketStatus();
   setInterval(updateMarketStatus, 60000);
   var initial = (location.hash||"").replace("#","");
@@ -1251,7 +1313,7 @@ function renderAdvancedChart(root, ticker, fullSeries, stateKey){
       "<div class='seg' id='adv-range'>" + ADV_RANGES.map(function(r){ return "<button data-range='" + r[0] + "'" + (state.range===r[0]?" class='on'":"") + ">" + r[0] + "</button>"; }).join("") + "</div>" +
       "<div class='seg' id='adv-type'>" + [["candles","Candles"],["area","Area"],["line","Line"]].map(function(t){ return "<button data-type='" + t[0] + "'" + (state.type===t[0]?" class='on'":"") + ">" + t[1] + "</button>"; }).join("") + "</div>" +
       "<button class='btn small ghost hidden' id='adv-reset-zoom'>&#10227; Reset zoom</button>" +
-      "<span class='muted small zoom-hint' style='align-self:center'>Drag across the chart to zoom &middot; double-click to reset</span>" +
+      "<span class='muted small zoom-hint' style='align-self:center'>Two-finger scroll to zoom &middot; drag to pan &middot; double-click to reset</span>" +
     "</div>" +
     "<div class='chart-toolbar'>" +
       "<span class='muted small' style='align-self:center'>Overlays:</span>" +
@@ -1281,6 +1343,7 @@ function renderAdvancedChart(root, ticker, fullSeries, stateKey){
   $("#adv-reset-zoom", root).addEventListener("click", function(){ ctx.zoom=null; drawAdvanced(ctx); });
 
   drawAdvanced(ctx);
+  wireInteractionsOnce(ctx);
 }
 
 // Absolute index window for the current view: honors a drag-zoom window if set,
@@ -1372,8 +1435,9 @@ function drawAdvanced(ctx){
   // ---- oscillator ----
   drawOsc(ctx, s, labels);
 
-  // ---- linked crosshair + drag-to-zoom + readout ----
-  wireInteractions(ctx, s);
+  // interactions are wired once to the persistent canvas elements (see
+  // wireInteractionsOnce); here we just record the current slice + readout.
+  ctx.curSlice = s;
   updateReadout(ctx, s, s.closes.length-1);
 }
 
@@ -1407,60 +1471,105 @@ function drawOsc(ctx, s, labels){
   });
 }
 
-function wireInteractions(ctx, s){
-  var charts = [ctx.charts.price, ctx.charts.volume, ctx.charts.osc].filter(Boolean);
-  var drag = null;
+// Bound ONCE per renderAdvancedChart to the persistent canvas elements, so
+// pan/zoom state survives the chart redraws (which destroy + recreate the Chart
+// instances but leave the <canvas> elements intact). Interactions:
+//   - two-finger vertical scroll (wheel) => zoom in/out around the cursor
+//   - horizontal drag                     => pan the visible date window
+//   - double-click                        => reset to the selected range
+function wireInteractionsOnce(ctx){
+  var n = ctx.series.closes.length;
+  var roles = ["price","volume","osc"];
+  var ids = {price:"#adv-price", volume:"#adv-volume", osc:"#adv-osc-canvas"};
+  var pan = null, rafPending = false, pendingWin = null;
+
+  function allCharts(){ return [ctx.charts.price, ctx.charts.volume, ctx.charts.osc].filter(Boolean); }
+  function curWin(){ var len = ctx.curSlice.closes.length; return {start:ctx.viewStart, end:ctx.viewStart+len-1, len:len}; }
+  function clampWin(start, end){
+    start = Math.round(start); end = Math.round(end);
+    if (start < 0){ end -= start; start = 0; }
+    if (end > n-1){ start -= (end-(n-1)); end = n-1; }
+    return {start:Math.max(0,start), end:Math.min(n-1,end)};
+  }
+  function applyWin(start, end){
+    var w = clampWin(start, end);
+    if (w.end - w.start < 4) return;
+    ctx.zoom = (w.start === 0 && w.end === n-1) ? null : {start:w.start, end:w.end};
+    drawAdvanced(ctx);
+  }
+  function applyWinThrottled(start, end){
+    pendingWin = [start, end];
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(function(){ rafPending = false; if (pendingWin){ applyWin(pendingWin[0], pendingWin[1]); pendingWin = null; } });
+  }
   function localIdx(chart, clientX){
     var rect = chart.canvas.getBoundingClientRect();
     var idx = Math.round(chart.scales.x.getValueForPixel(clientX - rect.left));
-    return Math.max(0, Math.min(s.closes.length-1, idx));
+    return Math.max(0, Math.min(ctx.curSlice.closes.length-1, idx));
   }
-  function pxInChart(chart, clientX){
-    var rect = chart.canvas.getBoundingClientRect();
-    return clientX - rect.left;
+  function hover(clientX){
+    var cs = allCharts(); if (!cs.length) return;
+    var idx = localIdx(cs[0], clientX);
+    cs.forEach(function(c){ c.$hoverIndex = idx; c.update("none"); });
+    updateReadout(ctx, ctx.curSlice, idx);
   }
-  function moveHover(clientX){
-    var idx = localIdx(charts[0], clientX);
-    charts.forEach(function(c){ c.$hoverIndex = idx; c.$dragRect = null; c.update("none"); });
-    updateReadout(ctx, s, idx);
+  function onPanMove(e){
+    if (!pan) return;
+    var chart = ctx.charts[pan.role]; if (!chart) return;
+    var a = chart.chartArea;
+    var winLen = pan.winEnd - pan.winStart + 1;
+    var barPx = (a.right - a.left) / Math.max(1, winLen);
+    var dxBars = Math.round((e.clientX - pan.startX) / barPx);
+    applyWinThrottled(pan.winStart - dxBars, pan.winEnd - dxBars);
   }
-  function endDrag(clientX){
-    if (!drag) return;
-    var endIdx = localIdx(drag.chart, clientX);
-    charts.forEach(function(c){ c.$dragRect = null; });
-    var lo = Math.min(drag.startIdx, endIdx), hi = Math.max(drag.startIdx, endIdx);
-    if (drag.moved && (hi - lo) >= 2){
-      // map indices within the current view back to the full series
-      ctx.zoom = { start: ctx.viewStart + lo, end: ctx.viewStart + hi };
-      drag = null;
-      drawAdvanced(ctx);
-    } else {
-      var c = drag.chart; drag = null; if (c) c.draw();
-    }
+  function onPanUp(){
+    pan = null;
+    window.removeEventListener("mousemove", onPanMove);
+    window.removeEventListener("mouseup", onPanUp);
   }
-  charts.forEach(function(chart){
-    var cv = chart.canvas;
-    cv.style.cursor = "crosshair";
-    cv.onmousedown = function(e){ drag = { chart:chart, startX:pxInChart(chart,e.clientX), startIdx:localIdx(chart,e.clientX), moved:false }; e.preventDefault(); };
-    cv.onmousemove = function(e){
-      if (drag){
-        drag.moved = true;
-        drag.chart.$dragRect = { x1:drag.startX, x2:pxInChart(drag.chart, e.clientX) };
-        drag.chart.$hoverIndex = null;
-        drag.chart.draw();
-      } else {
-        moveHover(e.clientX);
-      }
-    };
-    cv.onmouseup = function(e){ endDrag(e.clientX); };
-    cv.onmouseleave = function(){
-      if (drag){ var c = drag.chart; drag = null; charts.forEach(function(x){ x.$dragRect=null; }); if(c) c.draw(); }
-      charts.forEach(function(c){ c.$hoverIndex = null; c.update("none"); });
-      updateReadout(ctx, s, s.closes.length-1);
-    };
-    cv.ondblclick = function(){ if (ctx.zoom){ ctx.zoom = null; drawAdvanced(ctx); } };
-    // touch: hover only (drag-zoom via touch is finicky; range buttons cover it)
-    cv.ontouchmove = function(e){ if (e.touches[0]) moveHover(e.touches[0].clientX); };
+
+  roles.forEach(function(role){
+    var cv = $(ids[role], ctx.root);
+    if (!cv) return;
+    cv.style.cursor = "grab";
+    cv.addEventListener("mousedown", function(e){
+      var w = curWin();
+      pan = {role:role, startX:e.clientX, winStart:w.start, winEnd:w.end};
+      e.preventDefault();
+      window.addEventListener("mousemove", onPanMove);
+      window.addEventListener("mouseup", onPanUp);
+    });
+    cv.addEventListener("mousemove", function(e){ if (!pan) hover(e.clientX); });
+    cv.addEventListener("mouseleave", function(){
+      if (pan) return;
+      allCharts().forEach(function(c){ c.$hoverIndex = null; c.update("none"); });
+      updateReadout(ctx, ctx.curSlice, ctx.curSlice.closes.length-1);
+    });
+    cv.addEventListener("dblclick", function(){ if (ctx.zoom){ ctx.zoom = null; drawAdvanced(ctx); } });
+    cv.addEventListener("wheel", function(e){
+      e.preventDefault();
+      var chart = ctx.charts[role]; if (!chart) return;
+      var w = curWin();
+      var focus = w.start + localIdx(chart, e.clientX);
+      var factor = e.deltaY < 0 ? 0.85 : 1.18;   // scroll up = zoom in
+      var newLen = Math.max(6, Math.min(n, Math.round(w.len * factor)));
+      var rel = (focus - w.start) / Math.max(1, w.len);
+      var ns = Math.round(focus - rel * newLen);
+      applyWin(ns, ns + newLen - 1);
+    }, {passive:false});
+    // touch: single-finger horizontal pan
+    cv.addEventListener("touchstart", function(e){ if (e.touches.length===1){ var w=curWin(); pan={role:role, startX:e.touches[0].clientX, winStart:w.start, winEnd:w.end}; } }, {passive:true});
+    cv.addEventListener("touchmove", function(e){
+      if (pan && e.touches.length===1){
+        var chart=ctx.charts[pan.role]; if(!chart) return;
+        var a=chart.chartArea; var winLen=pan.winEnd-pan.winStart+1; var barPx=(a.right-a.left)/Math.max(1,winLen);
+        var dxBars=Math.round((e.touches[0].clientX-pan.startX)/barPx);
+        applyWinThrottled(pan.winStart-dxBars, pan.winEnd-dxBars);
+        e.preventDefault();
+      } else if (e.touches[0]) { hover(e.touches[0].clientX); }
+    }, {passive:false});
+    cv.addEventListener("touchend", function(){ pan = null; });
   });
 }
 
@@ -1563,13 +1672,71 @@ function renderCompanyDetail(){
     var variance = rets.reduce(function(a,b){return a+Math.pow(b-meanRet,2);},0)/rets.length;
     var annVol = Math.sqrt(variance*252)*100;
     var mdd = maxDrawdown(closes);
+    var f = s.fundamentals || {};
+    var name = f.name || tickerName(CO_TICKER);
     var updatedNote = s.updated ? ("Data as of " + esc(s.updated.slice(0,10))) : "";
+    var exch = f.exchange ? esc(f.exchange) : "";
+
+    // Yahoo-style stats grid. Prefer baked fundamentals; fall back to values
+    // derived from the OHLCV series so proxy/synthetic tickers still populate.
+    function stat(lbl, val){ return "<div class='stat-row'><span class='lbl'>" + lbl + "</span><span class='val'>" + val + "</span></div>"; }
+    var prevClose = f.previousClose != null ? f.previousClose : (closes.length>1?closes[closes.length-2]:price);
+    var openV = f.open != null ? f.open : (s.opens?s.opens[s.opens.length-1]:null);
+    var dRangeLo = f.dayLow != null ? f.dayLow : dayLo, dRangeHi = f.dayHigh != null ? f.dayHigh : dayHi;
+    var w52lo = f.fiftyTwoWeekLow != null ? f.fiftyTwoWeekLow : lo52, w52hi = f.fiftyTwoWeekHigh != null ? f.fiftyTwoWeekHigh : hi52;
+    var volNow = f.volume != null ? f.volume : volumes[volumes.length-1];
+    var avgV = f.avgVolume != null ? f.avgVolume : avgVol;
+    var divStr = (f.dividendRate != null) ? (fmtNum(f.dividendRate,2) + (f.dividendYield!=null?(" (" + fmtNum(f.dividendYield*100,2) + "%)"):"")) : "--";
+
+    var statsGrid =
+      "<div class='stats-grid'>" +
+        "<div>" +
+          stat("Previous Close", fmtNum(prevClose,2)) +
+          stat("Open", openV!=null?fmtNum(openV,2):"--") +
+          stat("Bid", f.bid!=null?fmtNum(f.bid,2):"--") +
+          stat("Ask", f.ask!=null?fmtNum(f.ask,2):"--") +
+        "</div>" +
+        "<div>" +
+          stat("Day&#39;s Range", fmtNum(dRangeLo,2) + " - " + fmtNum(dRangeHi,2)) +
+          stat("52 Week Range", fmtNum(w52lo,2) + " - " + fmtNum(w52hi,2)) +
+          stat("Volume", fmtInt(volNow)) +
+          stat("Avg. Volume", fmtInt(avgV)) +
+        "</div>" +
+        "<div>" +
+          stat("Market Cap", fmtBig(f.marketCap)) +
+          stat("Beta (5Y)", f.beta!=null?fmtNum(f.beta,2):"--") +
+          stat("PE Ratio (TTM)", f.trailingPE!=null?fmtNum(f.trailingPE,2):"--") +
+          stat("EPS (TTM)", f.trailingEps!=null?fmtNum(f.trailingEps,2):"--") +
+        "</div>" +
+        "<div>" +
+          stat("Earnings Date", fmtDateTs(f.earningsDate)) +
+          stat("Fwd Div &amp; Yield", divStr) +
+          stat("Ex-Dividend Date", fmtDateTs(f.exDividendDate)) +
+          stat("1y Target Est", f.targetMeanPrice!=null?fmtNum(f.targetMeanPrice,2):"--") +
+        "</div>" +
+      "</div>";
+
+    var overview = "";
+    if (f.summary || f.sector || f.industry){
+      overview =
+        "<div class='section-title'>" + esc(name) + " Overview</div>" +
+        "<div class='overview'>" +
+          "<div><p class='small' style='line-height:1.5'>" + esc(f.summary||"") + "</p>" +
+            (f.website ? "<p><a href='" + esc(f.website) + "' target='_blank' rel='noopener'>" + esc(f.website.replace(/^https?:\/\//,"")) + "</a></p>" : "") + "</div>" +
+          "<div class='prof'>" +
+            "<div><div class='big'>" + (f.employees!=null?fmtInt(f.employees):"--") + "</div><div class='sub'>Full-Time Employees</div></div>" +
+            "<div><div class='big'>" + (f.sharesOutstanding!=null?fmtBig(f.sharesOutstanding):"--") + "</div><div class='sub'>Shares Outstanding</div></div>" +
+            "<div><div class='big'>" + esc(f.sector||"--") + "</div><div class='sub'>Sector</div></div>" +
+            "<div><div class='big'>" + esc(f.industry||"--") + "</div><div class='sub'>Industry</div></div>" +
+          "</div>" +
+        "</div>";
+    }
 
     root.innerHTML =
       "<div class='card'>" +
         "<div class='flex-between'>" +
-          "<div><h2>" + esc(CO_TICKER) + (s.synthetic ? " <span class='tag'>sample data</span>" : "") + "</h2>" +
-            "<p class='muted small'>" + esc(tickerName(CO_TICKER)) + (updatedNote ? " &middot; " + updatedNote : "") + "</p></div>" +
+          "<div><h2>" + esc(CO_TICKER) + (exch?" <span class='tag'>" + exch + "</span>":"") + (s.synthetic ? " <span class='tag'>sample data</span>" : "") + "</h2>" +
+            "<p class='muted small'>" + esc(name) + (updatedNote ? " &middot; " + updatedNote : "") + "</p></div>" +
           "<div style='text-align:right'>" +
             "<div style='font-size:28px;font-weight:800'>" + fmtPrice(price) + "</div>" +
             "<div class='" + pctClass(chg) + "'>" + (chgAbs!=null?(chgAbs>=0?"+":"")+fmtNum(chgAbs,2):"--") + " (" + fmtPct(chg) + ") today</div>" +
@@ -1577,11 +1744,11 @@ function renderCompanyDetail(){
         "</div>" +
         "<div id='co-adv-chart' style='margin-top:14px'></div>" +
         "<div class='cta-row'><button class='btn small ghost' id='co-add-to-list'>Add " + esc(CO_TICKER) + " to watchlist</button></div>" +
-        "<div class='section-title'>Key Metrics</div>" +
+        "<div class='section-title'>Statistics</div>" +
+        statsGrid +
+        overview +
+        "<div class='section-title'>Technicals &amp; Performance</div>" +
         "<div class='grid cols-4'>" +
-          "<div class='card'><h3>Day Range</h3><div>" + fmtPrice(dayLo) + " &ndash; " + fmtPrice(dayHi) + "</div></div>" +
-          "<div class='card'><h3>52W Range</h3><div>" + fmtPrice(lo52) + " &ndash; " + fmtPrice(hi52) + "</div><div class='kpi-sub muted'>" + fmtNum(pos52,0) + "% of range</div></div>" +
-          "<div class='card'><h3>Avg Vol (20d)</h3><div>" + (avgVol>=1e6?(avgVol/1e6).toFixed(2)+"M":Math.round(avgVol).toLocaleString()) + "</div></div>" +
           "<div class='card'><h3>Money Flow</h3><div><span class='pill " + status.cls + "'>" + status.label + "</span></div></div>" +
           "<div class='card'><h3>RSI(14)</h3><div class='" + (rsiVal>70?"down":(rsiVal<30?"up":"")) + "'>" + fmtNum(rsiVal,1) + "</div></div>" +
           "<div class='card'><h3>MFI(14)</h3><div class='" + (mfiVal>80?"down":(mfiVal<20?"up":"")) + "'>" + fmtNum(mfiVal,1) + "</div></div>" +
@@ -1590,7 +1757,6 @@ function renderCompanyDetail(){
           "<div class='card'><h3>YTD Return</h3><div class='" + pctClass(ytdReturn) + "'>" + fmtPct(ytdReturn) + "</div></div>" +
           "<div class='card'><h3>1Y Return</h3><div class='" + pctClass(oneYReturn) + "'>" + fmtPct(oneYReturn) + "</div></div>" +
           "<div class='card'><h3>Max Drawdown (2Y)</h3><div class='down'>" + fmtNum(mdd,1) + "%</div></div>" +
-          "<div class='card'><h3>Data Points</h3><div>" + closes.length + " days</div></div>" +
         "</div>" +
       "</div>";
 
