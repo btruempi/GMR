@@ -1750,7 +1750,296 @@ function runNLCommand(){
 }
 """
 
-APP_JS = JS_OPEN + JS_CORE + JS_PROXY + JS_ROUTER + JS_DASHBOARD + JS_WATCHLISTS + JS_COMPANIES + JS_OPTIMIZER + JS_BACKTEST + JS_UPDATES + JS_PREIPO + JS_PROFILE + JS_CLOSE
+JS_GITHUB = r"""
+// ---- GitHub API helpers (used by Alerts + Methodology tabs) -----------
+function ghHeaders(){
+  return { "Authorization": "token " + STATE.githubToken, "Accept": "application/vnd.github+json" };
+}
+function ghRepoPath(){ return STATE.githubRepo; } // "owner/repo"
+function ghGet(path){
+  return fetch("https://api.github.com" + path, { headers: ghHeaders() })
+    .then(function(res){ return res.json().then(function(json){ return {ok:res.ok, status:res.status, json:json}; }).catch(function(){ return {ok:res.ok, status:res.status, json:null}; }); });
+}
+function ghPutFile(filePath, contentObjOrText, message){
+  var repo = ghRepoPath();
+  var apiPath = "/repos/" + repo + "/contents/" + filePath;
+  var text = (typeof contentObjOrText === "string") ? contentObjOrText : JSON.stringify(contentObjOrText, null, 2);
+  var b64 = btoa(unescape(encodeURIComponent(text)));
+  return ghGet(apiPath).then(function(existing){
+    var sha = (existing.ok && existing.json && existing.json.sha) ? existing.json.sha : undefined;
+    var body = { message: message, content: b64 };
+    if (sha) body.sha = sha;
+    return fetch("https://api.github.com" + apiPath, {
+      method: "PUT", headers: Object.assign({"Content-Type":"application/json"}, ghHeaders()), body: JSON.stringify(body)
+    }).then(function(res){ return res.json().then(function(json){ return {ok:res.ok, status:res.status, json:json}; }); });
+  });
+}
+function ghDispatchWorkflow(workflowFile, inputs){
+  var repo = ghRepoPath();
+  return fetch("https://api.github.com/repos/" + repo + "/actions/workflows/" + workflowFile + "/dispatches", {
+    method: "POST", headers: Object.assign({"Content-Type":"application/json"}, ghHeaders()),
+    body: JSON.stringify({ ref: "main", inputs: inputs || {} })
+  }).then(function(res){ return {ok:res.ok, status:res.status}; });
+}
+"""
+
+JS_ALERTS = r"""
+// ---- Alerts tab (16 rule types) ----------------------------------------
+var RULE_DEFS = [
+  {key:"price_above", label:"Price above", fields:[{name:"price", label:"Price ($)", type:"number", def:100}]},
+  {key:"price_below", label:"Price below", fields:[{name:"price", label:"Price ($)", type:"number", def:50}]},
+  {key:"pct_change", label:"N-day % change", fields:[{name:"days", label:"Days", type:"number", def:5}, {name:"pct", label:"Threshold %", type:"number", def:10}]},
+  {key:"pct_change_from_anchor", label:"% change since date", fields:[{name:"anchor", label:"Anchor date", type:"date", def:todayISO()}, {name:"pct", label:"Threshold %", type:"number", def:10}]},
+  {key:"rsi_above", label:"RSI above", fields:[{name:"level", label:"RSI level", type:"number", def:70}]},
+  {key:"rsi_below", label:"RSI below", fields:[{name:"level", label:"RSI level", type:"number", def:30}]},
+  {key:"sma_cross_up", label:"SMA golden cross (50/200 up)", fields:[]},
+  {key:"sma_cross_down", label:"SMA death cross (50/200 down)", fields:[]},
+  {key:"macd_cross_up", label:"MACD bullish cross", fields:[]},
+  {key:"macd_cross_down", label:"MACD bearish cross", fields:[]},
+  {key:"volume_spike", label:"Volume spike (x 20d avg)", fields:[{name:"multiplier", label:"Multiplier", type:"number", def:2}]},
+  {key:"money_pouring_in", label:"Money pouring in (CMF)", fields:[{name:"threshold", label:"CMF threshold", type:"number", def:0.05}]},
+  {key:"distribution_warning", label:"Distribution warning (CMF)", fields:[{name:"threshold", label:"CMF threshold", type:"number", def:0.05}]},
+  {key:"mfi_overbought", label:"MFI overbought", fields:[{name:"level", label:"MFI level", type:"number", def:80}]},
+  {key:"mfi_oversold", label:"MFI oversold", fields:[{name:"level", label:"MFI level", type:"number", def:20}]},
+  {key:"obv_breakout", label:"OBV new N-day high", fields:[{name:"lookback", label:"Lookback (days)", type:"number", def:20}]}
+];
+var RULE_RECIPES = [
+  {label:"RSI Oversold", type:"rsi_below", params:{level:30}},
+  {label:"RSI Overbought", type:"rsi_above", params:{level:70}},
+  {label:"Golden Cross", type:"sma_cross_up", params:{}},
+  {label:"Death Cross", type:"sma_cross_down", params:{}},
+  {label:"MACD Bullish Cross", type:"macd_cross_up", params:{}},
+  {label:"Volume Spike 2x", type:"volume_spike", params:{multiplier:2}},
+  {label:"Money Pouring In", type:"money_pouring_in", params:{threshold:0.05}},
+  {label:"Distribution Warning", type:"distribution_warning", params:{threshold:0.05}}
+];
+var ALERT_FORM = { type:"rsi_below", ticker:"", params:{} };
+var SMS_CARRIERS = {
+  "": "-- none --", "vtext.com":"Verizon", "txt.att.net":"AT&T", "tmomail.net":"T-Mobile",
+  "email.uscc.net":"US Cellular", "sms.cricketwireless.net":"Cricket", "mymetropcs.com":"Metro",
+  "sms.myboostmobile.com":"Boost", "msg.fi.google.com":"Google Fi"
+};
+
+function ruleDef(type){ return RULE_DEFS.filter(function(r){ return r.key===type; })[0]; }
+function ruleSummary(rule){
+  var def = ruleDef(rule.type);
+  var parts = Object.keys(rule.params||{}).map(function(k){ return k + "=" + rule.params[k]; });
+  return (def?def.label:rule.type) + (parts.length ? " (" + parts.join(", ") + ")" : "");
+}
+
+RENDERERS.alerts = function(root){
+  var a = STATE.alerts;
+  root.innerHTML =
+    "<div class='card'>" +
+      "<h2>Alerts</h2>" +
+      "<p class='muted small'>Rule-based alerts evaluated by a GitHub Actions workflow every 15 minutes during US market hours, plus a daily digest.</p>" +
+      "<div class='section-title'>Quick Recipes</div>" +
+      "<div class='row' id='alert-recipes'></div>" +
+      "<div class='section-title'>New Rule</div>" +
+      "<div class='grid cols-2'>" +
+        "<div><label>Ticker</label><input id='rule-ticker' type='text' placeholder='e.g. CCJ' style='text-transform:uppercase'></div>" +
+        "<div><label>Rule type</label><select id='rule-type'>" + RULE_DEFS.map(function(r){ return "<option value='" + r.key + "'" + (r.key===ALERT_FORM.type?" selected":"") + ">" + esc(r.label) + "</option>"; }).join("") + "</select></div>" +
+      "</div>" +
+      "<div class='grid cols-2' id='rule-param-fields' style='margin-top:6px'></div>" +
+      "<div class='cta-row'><button class='btn' id='rule-add-btn'>Add rule</button></div>" +
+    "</div>" +
+    "<div class='card'><h3>Armed Rules</h3><div id='rules-list'></div></div>" +
+    "<div class='card'>" +
+      "<h3>Notification Channels</h3>" +
+      "<div class='grid cols-2'>" +
+        "<div><label>Email</label><input id='chan-email' type='email' value='" + esc((a.channels&&a.channels.email)||"") + "'></div>" +
+        "<div><label>Phone number (10 digits)</label><input id='chan-phone' type='text' value='" + esc((a.channels&&a.channels.sms&&a.channels.sms.number)||"") + "'></div>" +
+        "<div><label>Carrier (SMS via email gateway)</label><select id='chan-carrier'>" +
+          Object.keys(SMS_CARRIERS).map(function(k){ return "<option value='" + k + "'" + ((a.channels&&a.channels.sms&&a.channels.sms.carrier)===k?" selected":"") + ">" + SMS_CARRIERS[k] + "</option>"; }).join("") +
+        "</select></div>" +
+      "</div>" +
+      "<p class='footer-note'>Email-to-SMS gateways are unreliable and carriers can silently drop messages -- treat SMS as best-effort. For guaranteed delivery, a paid provider like Twilio is a natural upgrade path (not implemented here to keep this a $0/month tool).</p>" +
+      "<div class='cta-row'><button class='btn secondary' id='chan-save'>Save channels</button><span id='chan-saved' class='footer-note'></span></div>" +
+    "</div>" +
+    "<div class='card'>" +
+      "<h3>Connect GitHub</h3>" +
+      "<p class='muted small'>Needed to push alerts.json / watchlists.json and to dispatch the test workflow. Create a token at " +
+        "<a href='https://github.com/settings/tokens/new?scopes=repo,workflow&description=GMR' target='_blank' rel='noopener'>github.com/settings/tokens/new</a> with <b>repo</b> and <b>workflow</b> scopes.</p>" +
+      "<div class='grid cols-2'>" +
+        "<div><label>owner/repo</label><input id='gh-repo' type='text' placeholder='yourname/GMR' value='" + esc(STATE.githubRepo||"") + "'></div>" +
+        "<div><label>Personal Access Token</label><input id='gh-token' type='text' placeholder='ghp_...' value='" + esc(STATE.githubToken||"") + "'></div>" +
+      "</div>" +
+      "<div class='cta-row'><button class='btn secondary' id='gh-save'>Save connection</button><button class='btn' id='arm-btn'>Arm my alerts</button><span id='arm-status' class='footer-note'></span></div>" +
+    "</div>" +
+    "<div class='card'>" +
+      "<h3>Verify Notifications Work</h3>" +
+      "<div class='cta-row'>" +
+        "<button class='btn' id='test-alert-btn'>Send me a test alert NOW</button>" +
+        "<button class='btn secondary' id='diagnose-btn'>Diagnose setup</button>" +
+      "</div>" +
+      "<div id='diagnose-output' style='margin-top:12px'></div>" +
+    "</div>";
+
+  renderRuleRecipes();
+  renderRuleParamFields();
+  $("#rule-type").addEventListener("change", function(){ ALERT_FORM.type = this.value; ALERT_FORM.params = {}; renderRuleParamFields(); });
+  $("#rule-add-btn").addEventListener("click", addRule);
+  renderRulesList();
+
+  $("#chan-save").addEventListener("click", function(){
+    STATE.alerts.channels = STATE.alerts.channels || {};
+    STATE.alerts.channels.email = $("#chan-email").value.trim();
+    STATE.alerts.channels.sms = { number: $("#chan-phone").value.trim(), carrier: $("#chan-carrier").value };
+    saveAlerts();
+    $("#chan-saved").textContent = "Saved.";
+  });
+  $("#gh-save").addEventListener("click", function(){
+    STATE.githubRepo = $("#gh-repo").value.trim();
+    STATE.githubToken = $("#gh-token").value.trim();
+    lsSet("githubRepo", STATE.githubRepo);
+    lsSet("githubToken", STATE.githubToken);
+    $("#arm-status").textContent = "Connection saved.";
+  });
+  $("#arm-btn").addEventListener("click", armAlerts);
+  $("#test-alert-btn").addEventListener("click", sendTestAlert);
+  $("#diagnose-btn").addEventListener("click", diagnoseSetup);
+};
+
+function renderRuleRecipes(){
+  var root = $("#alert-recipes");
+  root.innerHTML = RULE_RECIPES.map(function(r,i){ return "<span class='chip' data-recipe='" + i + "'>" + esc(r.label) + "</span>"; }).join("");
+  $all("[data-recipe]", root).forEach(function(chip){
+    chip.addEventListener("click", function(){
+      var recipe = RULE_RECIPES[parseInt(chip.dataset.recipe)];
+      ALERT_FORM.type = recipe.type;
+      ALERT_FORM.params = Object.assign({}, recipe.params);
+      $("#rule-type").value = recipe.type;
+      renderRuleParamFields();
+    });
+  });
+}
+
+function renderRuleParamFields(){
+  var root = $("#rule-param-fields");
+  var def = ruleDef(ALERT_FORM.type);
+  root.innerHTML = (def.fields||[]).map(function(f){
+    var val = (ALERT_FORM.params[f.name] != null) ? ALERT_FORM.params[f.name] : f.def;
+    return "<div><label>" + esc(f.label) + "</label><input data-param='" + f.name + "' type='" + f.type + "' value='" + esc(val) + "'></div>";
+  }).join("") || "<p class='muted small'>No extra parameters for this rule type.</p>";
+  $all("[data-param]", root).forEach(function(inp){
+    inp.addEventListener("input", function(){ ALERT_FORM.params[inp.dataset.param] = inp.type==="number" ? parseFloat(inp.value) : inp.value; });
+    ALERT_FORM.params[inp.dataset.param] = inp.type==="number" ? parseFloat(inp.value) : inp.value;
+  });
+}
+
+function addRule(){
+  var ticker = ($("#rule-ticker").value||"").trim().toUpperCase();
+  if (!ticker){ alert("Enter a ticker first."); return; }
+  var rule = { id: uid(), type: ALERT_FORM.type, ticker: ticker, params: Object.assign({}, ALERT_FORM.params), enabled: true };
+  STATE.alerts.rules = STATE.alerts.rules || [];
+  STATE.alerts.rules.push(rule);
+  saveAlerts();
+  renderRulesList();
+}
+
+function renderRulesList(){
+  var root = $("#rules-list");
+  var rules = STATE.alerts.rules || [];
+  if (!rules.length){ root.innerHTML = "<p class='muted small'>No rules armed yet -- add one above.</p>"; return; }
+  root.innerHTML = "<table><thead><tr><th>Ticker</th><th>Rule</th><th>Status</th><th></th></tr></thead><tbody>" +
+    rules.map(function(r){
+      return "<tr><td>" + esc(r.ticker) + "</td><td>" + esc(ruleSummary(r)) + "</td>" +
+        "<td><span class='pill" + (r.enabled?" up":"") + "'>" + (r.enabled?"Armed":"Paused") + "</span></td>" +
+        "<td><button class='btn small ghost' data-toggle-rule='" + r.id + "'>" + (r.enabled?"Pause":"Resume") + "</button> " +
+        "<button class='btn small ghost' data-remove-rule='" + r.id + "'>Remove</button></td></tr>";
+    }).join("") + "</tbody></table>";
+  $all("[data-toggle-rule]", root).forEach(function(b){
+    b.addEventListener("click", function(){
+      var r = STATE.alerts.rules.filter(function(x){ return x.id===b.dataset.toggleRule; })[0];
+      if (r){ r.enabled = !r.enabled; saveAlerts(); renderRulesList(); }
+    });
+  });
+  $all("[data-remove-rule]", root).forEach(function(b){
+    b.addEventListener("click", function(){
+      STATE.alerts.rules = STATE.alerts.rules.filter(function(x){ return x.id!==b.dataset.removeRule; });
+      saveAlerts(); renderRulesList();
+    });
+  });
+}
+
+function requireGithubConnection(){
+  if (!STATE.githubRepo || !STATE.githubToken){
+    alert("Connect GitHub first (owner/repo + Personal Access Token) below.");
+    return false;
+  }
+  return true;
+}
+
+function armAlerts(){
+  if (!requireGithubConnection()) return;
+  var status = $("#arm-status");
+  status.textContent = "Pushing alerts.json and watchlists.json...";
+  Promise.all([
+    ghPutFile("data/alerts.json", STATE.alerts, "GMR: update alerts.json via Alerts tab"),
+    ghPutFile("data/watchlists.json", STATE.watchlists, "GMR: update watchlists.json via Alerts tab")
+  ]).then(function(results){
+    var allOk = results.every(function(r){ return r.ok; });
+    status.textContent = allOk ? "Armed! Your rules will run on the next scheduled workflow tick." : "Something failed -- check the token scopes (needs repo + workflow) and repo name.";
+  }).catch(function(e){
+    console.error("GMR: arm alerts failed", e);
+    status.textContent = "Push failed -- see console for details.";
+  });
+}
+
+function sendTestAlert(){
+  if (!requireGithubConnection()) return;
+  var btn = $("#test-alert-btn");
+  btn.disabled = true; btn.textContent = "Sending...";
+  ghDispatchWorkflow("nri-email.yml", { test: "true" }).then(function(res){
+    btn.disabled = false;
+    btn.textContent = "Send me a test alert NOW";
+    alert(res.ok ? "Test alert dispatched. Check your inbox within about a minute." : "Dispatch failed (status " + res.status + "). Check that the workflow file is pushed (Methodology tab) and your token has the workflow scope.");
+  }).catch(function(e){
+    btn.disabled = false; btn.textContent = "Send me a test alert NOW";
+    console.error("GMR: test dispatch failed", e);
+    alert("Dispatch failed -- see console for details.");
+  });
+}
+
+function diagnoseSetup(){
+  if (!requireGithubConnection()) return;
+  var root = $("#diagnose-output");
+  root.innerHTML = "<p class='muted small'>Running diagnostics...</p>";
+  var repo = ghRepoPath();
+  var checks = [
+    {label:"Workflow file present", path:"/repos/" + repo + "/contents/.github/workflows/nri-email.yml"},
+    {label:"Send script present", path:"/repos/" + repo + "/contents/scripts/maybe_send_email.py"},
+    {label:"alerts.json present", path:"/repos/" + repo + "/contents/data/alerts.json"},
+    {label:"watchlists.json present", path:"/repos/" + repo + "/contents/data/watchlists.json"},
+    {label:"GMAIL_APP_PASSWORD secret set", path:"/repos/" + repo + "/actions/secrets/GMAIL_APP_PASSWORD"},
+    {label:"Last workflow run status", path:"/repos/" + repo + "/actions/workflows/nri-email.yml/runs?per_page=1"}
+  ];
+  Promise.all(checks.map(function(c){ return ghGet(c.path).then(function(r){ return {label:c.label, ok:r.ok, json:r.json}; }); }))
+    .then(function(results){
+      var rows = results.map(function(r){
+        var detail = "";
+        if (r.label === "Last workflow run status"){
+          var run = r.json && r.json.workflow_runs && r.json.workflow_runs[0];
+          detail = run ? (run.status + "/" + (run.conclusion||"pending")) : "no runs yet";
+          r.ok = !!run;
+        }
+        return "<tr><td>" + esc(r.label) + "</td><td class='" + (r.ok?"diag-ok":"diag-bad") + "'>" + (r.ok?"OK":"MISSING") + (detail?" (" + esc(detail) + ")":"") + "</td></tr>";
+      });
+      var emailOk = !!(STATE.alerts.channels && STATE.alerts.channels.email);
+      rows.push("<tr><td>Email address configured</td><td class='" + (emailOk?"diag-ok":"diag-bad") + "'>" + (emailOk?"OK":"MISSING") + "</td></tr>");
+      var sms = STATE.alerts.channels && STATE.alerts.channels.sms;
+      var smsOk = !!(sms && sms.number && sms.carrier);
+      rows.push("<tr><td>SMS gateway resolved</td><td class='" + (smsOk?"diag-ok":"diag-bad") + "'>" + (smsOk?"OK":"not configured (optional)") + "</td></tr>");
+      root.innerHTML = "<table class='status-table'><tbody>" + rows.join("") + "</tbody></table>";
+    })
+    .catch(function(e){
+      console.error("GMR: diagnose failed", e);
+      root.innerHTML = "<p class='muted small'>Diagnostics failed -- check your token/repo and console.</p>";
+    });
+}
+"""
+
+APP_JS = JS_OPEN + JS_CORE + JS_PROXY + JS_ROUTER + JS_DASHBOARD + JS_WATCHLISTS + JS_COMPANIES + JS_OPTIMIZER + JS_BACKTEST + JS_UPDATES + JS_PREIPO + JS_PROFILE + JS_GITHUB + JS_ALERTS + JS_CLOSE
 
 
 if __name__ == "__main__":
