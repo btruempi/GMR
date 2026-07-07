@@ -25,15 +25,34 @@ RANGE = "2y"
 SLEEP = 0.25  # be polite to Yahoo, avoid rate limiting
 
 
+def _load(rel_path, default):
+    path = os.path.join(ROOT, rel_path)
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
 def collect_tickers():
+    """Universe = constituents + presets + the user's saved watchlists +
+    an editable data/extra_tickers.json. Anything the user adds to a watchlist
+    (once pushed via 'Arm my alerts') or drops in extra_tickers.json gets real
+    baked data on the next refresh."""
     tickers = set()
-    with open(os.path.join(ROOT, "data", "constituents.json"), encoding="utf-8") as f:
-        for c in json.load(f):
-            tickers.add(c["ticker"].upper())
-    with open(os.path.join(ROOT, "data", "presets.json"), encoding="utf-8") as f:
-        for p in json.load(f):
-            for t in p["tickers"]:
-                tickers.add(t.upper())
+    for c in _load("data/constituents.json", []):
+        tickers.add(c["ticker"].upper())
+    for p in _load("data/presets.json", []):
+        for t in p.get("tickers", []):
+            tickers.add(t.upper())
+    wl = _load("data/watchlists.json", {})
+    for lst in (wl.get("lists") or {}).values():
+        for t in lst.get("tickers", []):
+            tickers.add(t.upper())
+    for t in _load("data/extra_tickers.json", []):
+        tickers.add(str(t).upper())
     return sorted(tickers)
 
 
