@@ -1600,7 +1600,157 @@ RENDERERS.preipo = function(root){
 };
 """
 
-APP_JS = JS_OPEN + JS_CORE + JS_PROXY + JS_ROUTER + JS_DASHBOARD + JS_WATCHLISTS + JS_COMPANIES + JS_OPTIMIZER + JS_BACKTEST + JS_UPDATES + JS_PREIPO + JS_CLOSE
+JS_PROFILE = r"""
+// ---- Profile tab + NL quick command bar --------------------------------
+var NL_HELP_MESSAGE =
+  "I did not catch a change in that. Here is exactly what I can do:<br>" +
+  "<b>Build a watchlist</b> -- try \"build me a watchlist for semiconductors\" or \"help me track neuro stocks\".<br>" +
+  "<b>Tweak your portfolio profile</b> -- mention any of: capital $10000, max position 20%, min position 5%, " +
+  "hold 6 to 10 names, target vol 20%, max drawdown 25%, exclude TSLA, require NVDA, objective max-sharpe " +
+  "(or min-vol / aggressive).";
+
+RENDERERS.profile = function(root){
+  root.innerHTML =
+    "<div class='card'>" +
+      "<h2>Quick Command Bar</h2>" +
+      "<p class='muted small'>Plain-English shortcuts -- no AI involved, just pattern matching against known intents.</p>" +
+      "<div class='row'><input id='nl-input' type='text' placeholder='e.g. build me a watchlist for cybersecurity' style='flex:1;min-width:260px'><button class='btn' id='nl-run'>Run</button></div>" +
+      "<div id='nl-output' class='footer-note'></div>" +
+    "</div>" +
+    "<div id='pf-form-wrap'></div>";
+
+  $("#nl-run").addEventListener("click", runNLCommand);
+  $("#nl-input").addEventListener("keydown", function(e){ if (e.key==="Enter") runNLCommand(); });
+  renderProfileForm();
+};
+
+function renderProfileForm(){
+  var root = $("#pf-form-wrap");
+  var p = STATE.profile;
+  root.innerHTML =
+    "<div class='card'>" +
+      "<h2>Risk Profile</h2>" +
+      "<div class='grid cols-2'>" +
+        "<div><label>Capital ($)</label><input id='pf-capital' type='number' value='" + p.capital + "'></div>" +
+        "<div><label>Objective</label><select id='pf-objective'>" +
+          ["max-sharpe","min-vol","aggressive"].map(function(o){ return "<option value='" + o + "'" + (p.objective===o?" selected":"") + ">" + o + "</option>"; }).join("") +
+        "</select></div>" +
+        "<div><label>Max position size (%)</label><input id='pf-maxpos' type='number' value='" + p.maxPosition + "'></div>" +
+        "<div><label>Min position size (%)</label><input id='pf-minpos' type='number' value='" + p.minPosition + "'></div>" +
+        "<div><label>Hold min names</label><input id='pf-holdmin' type='number' value='" + p.holdMin + "'></div>" +
+        "<div><label>Hold max names</label><input id='pf-holdmax' type='number' value='" + p.holdMax + "'></div>" +
+        "<div><label>Target volatility (%)</label><input id='pf-targetvol' type='number' value='" + p.targetVol + "'></div>" +
+        "<div><label>Max drawdown (%)</label><input id='pf-maxdd' type='number' value='" + p.maxDrawdown + "'></div>" +
+        "<div><label>Exclude tickers (comma-separated)</label><input id='pf-exclude' type='text' value='" + esc((p.exclude||[]).join(", ")) + "'></div>" +
+        "<div><label>Require tickers (comma-separated)</label><input id='pf-require' type='text' value='" + esc((p.require||[]).join(", ")) + "'></div>" +
+      "</div>" +
+      "<div class='cta-row'><button class='btn' id='pf-save'>Save profile</button><span id='pf-saved' class='footer-note'></span></div>" +
+    "</div>";
+
+  $("#pf-save").addEventListener("click", function(){
+    STATE.profile.capital = parseFloat($("#pf-capital").value) || 0;
+    STATE.profile.objective = $("#pf-objective").value;
+    STATE.profile.maxPosition = parseFloat($("#pf-maxpos").value) || 0;
+    STATE.profile.minPosition = parseFloat($("#pf-minpos").value) || 0;
+    STATE.profile.holdMin = parseInt($("#pf-holdmin").value) || 0;
+    STATE.profile.holdMax = parseInt($("#pf-holdmax").value) || 0;
+    STATE.profile.targetVol = parseFloat($("#pf-targetvol").value) || 0;
+    STATE.profile.maxDrawdown = parseFloat($("#pf-maxdd").value) || 0;
+    STATE.profile.exclude = ($("#pf-exclude").value||"").split(",").map(function(s){return s.trim().toUpperCase();}).filter(Boolean);
+    STATE.profile.require = ($("#pf-require").value||"").split(",").map(function(s){return s.trim().toUpperCase();}).filter(Boolean);
+    saveProfile();
+    $("#pf-saved").textContent = "Saved.";
+  });
+}
+
+function findPresetByPhrase(phrase){
+  phrase = phrase.toLowerCase().trim().replace(/\bstocks?\b/g,"").replace(/\bshares?\b/g,"").trim();
+  if (!phrase) return null;
+  var best = null;
+  STATE.presets.forEach(function(p){
+    var aliases = (p.aliases||[]).concat([p.label.toLowerCase()]);
+    aliases.forEach(function(a){
+      if (phrase.indexOf(a) !== -1 || a.indexOf(phrase) !== -1) {
+        if (!best || a.length > best.matchLen) best = {preset:p, matchLen:a.length};
+      }
+    });
+  });
+  return best ? best.preset : null;
+}
+
+function tryWatchlistIntent(text){
+  var patterns = [
+    /build (?:me )?a watchlist for (.+)/i,
+    /create (?:me )?a watchlist for (.+)/i,
+    /help me track (.+)/i,
+    /track (.+)/i,
+    /watchlist (?:for|of) (.+)/i
+  ];
+  for (var i=0;i<patterns.length;i++){
+    var m = text.match(patterns[i]);
+    if (m){
+      var preset = findPresetByPhrase(m[1]);
+      if (preset){
+        STATE.watchlists.lists[preset.key] = { label:preset.label, desc:preset.desc, tickers:preset.tickers.slice(), indicators: Object.assign({}, DEFAULT_INDICATORS) };
+        STATE.watchlists.active = preset.key;
+        saveWatchlists();
+        return "Built the <b>" + esc(preset.label) + "</b> watchlist (" + preset.tickers.length + " names). Open the Watchlists tab to see it.";
+      }
+      return null;
+    }
+  }
+  return null;
+}
+
+var NL_STOPWORDS = "(?:and|be|is|the|for|with|target|vol(?:atility)?|max(?:imum)?|min(?:imum)?|hold|require|exclude|objective|aggressive|names?|position|drawdown|capital|of|to|sharpe)";
+function extractTickerList(text, keyword){
+  var token = "(?!" + NL_STOPWORDS + "\\b)[a-z]{1,5}";
+  var re = new RegExp(keyword + "\\s+(" + token + "(?:\\s*,\\s*" + token + ")*)", "i");
+  var m = text.match(re);
+  if (!m) return null;
+  return m[1].split(",").map(function(s){ return s.trim().toUpperCase(); }).filter(Boolean);
+}
+
+function tryPortfolioIntent(text){
+  var p = STATE.profile;
+  var changes = [];
+  var m;
+  if ((m = text.match(/capital\s*\$?([\d,]+(?:\.\d+)?)/i))){ p.capital = parseFloat(m[1].replace(/,/g,"")); changes.push("capital -> $" + p.capital); }
+  if ((m = text.match(/max(?:imum)? position\s*(?:size)?\s*(?:of|to)?\s*(\d+(?:\.\d+)?)\s*%/i))){ p.maxPosition = parseFloat(m[1]); changes.push("max position -> " + p.maxPosition + "%"); }
+  if ((m = text.match(/min(?:imum)? position\s*(?:size)?\s*(?:of|to)?\s*(\d+(?:\.\d+)?)\s*%/i))){ p.minPosition = parseFloat(m[1]); changes.push("min position -> " + p.minPosition + "%"); }
+  if ((m = text.match(/hold\s*(\d+)\s*(?:to|-)\s*(\d+)\s*names?/i))){ p.holdMin = parseInt(m[1]); p.holdMax = parseInt(m[2]); changes.push("hold " + p.holdMin + " to " + p.holdMax + " names"); }
+  if ((m = text.match(/target vol(?:atility)?\s*(?:of|to)?\s*(\d+(?:\.\d+)?)\s*%/i))){ p.targetVol = parseFloat(m[1]); changes.push("target vol -> " + p.targetVol + "%"); }
+  if ((m = text.match(/max(?:imum)? drawdown\s*(?:of|to)?\s*(\d+(?:\.\d+)?)\s*%/i))){ p.maxDrawdown = parseFloat(m[1]); changes.push("max drawdown -> " + p.maxDrawdown + "%"); }
+  var ex = extractTickerList(text, "exclude");
+  if (ex){
+    p.exclude = Array.from(new Set((p.exclude||[]).concat(ex)));
+    changes.push("exclude -> " + p.exclude.join(", "));
+  }
+  var req = extractTickerList(text, "require");
+  if (req){
+    p.require = Array.from(new Set((p.require||[]).concat(req)));
+    changes.push("require -> " + p.require.join(", "));
+  }
+  if (/aggressive/i.test(text)){ p.objective = "aggressive"; changes.push("objective -> aggressive"); }
+  else if (/min[- ]vol/i.test(text)){ p.objective = "min-vol"; changes.push("objective -> min-vol"); }
+  else if (/max[- ]sharpe/i.test(text)){ p.objective = "max-sharpe"; changes.push("objective -> max-sharpe"); }
+
+  if (!changes.length) return null;
+  saveProfile();
+  if ($("#pf-form-wrap")) renderProfileForm();
+  return "Updated your profile: " + changes.join("; ") + ".";
+}
+
+function runNLCommand(){
+  var text = ($("#nl-input").value||"").trim();
+  var out = $("#nl-output");
+  if (!text){ out.innerHTML = NL_HELP_MESSAGE; return; }
+  var result = tryWatchlistIntent(text) || tryPortfolioIntent(text);
+  out.innerHTML = result || NL_HELP_MESSAGE;
+}
+"""
+
+APP_JS = JS_OPEN + JS_CORE + JS_PROXY + JS_ROUTER + JS_DASHBOARD + JS_WATCHLISTS + JS_COMPANIES + JS_OPTIMIZER + JS_BACKTEST + JS_UPDATES + JS_PREIPO + JS_PROFILE + JS_CLOSE
 
 
 if __name__ == "__main__":
