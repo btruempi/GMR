@@ -968,7 +968,173 @@ function renderWatchlistChart(list){
 }
 """
 
-APP_JS = JS_OPEN + JS_CORE + JS_PROXY + JS_ROUTER + JS_DASHBOARD + JS_WATCHLISTS + JS_CLOSE
+JS_COMPANIES = r"""
+// ---- Companies tab ---------------------------------------------------
+var CO_TICKER = lsGet("companiesTicker", "CCJ");
+var CO_COMPARE = lsGet("companiesCompare", ["CCJ", "CEG", "LEU"]);
+
+function tickerName(ticker){
+  var hit = STATE.constituents.filter(function(c){ return c.ticker === ticker; })[0];
+  return hit ? hit.name : ticker;
+}
+
+RENDERERS.companies = function(root){
+  root.innerHTML =
+    "<div class='hero card'>" +
+      "<h1>Look up any US-listed ticker.</h1>" +
+      "<p>Live chart, key metrics, and money-flow signals -- then compare it against other names.</p>" +
+      "<div class='cta-row'>" +
+        "<input id='co-search' type='text' placeholder='e.g. NVDA' style='width:200px;text-transform:uppercase'>" +
+        "<button class='btn' id='co-search-btn'>Search</button>" +
+      "</div>" +
+    "</div>" +
+    "<div id='co-detail'></div>" +
+    "<div class='card'>" +
+      "<h3>Compare Multiple Stocks</h3>" +
+      "<div class='row' id='co-compare-chips'></div>" +
+      "<div class='row' style='margin-top:10px'><input id='co-compare-add' type='text' placeholder='Add ticker to compare' style='width:180px;text-transform:uppercase'><button class='btn small' id='co-compare-add-btn'>Add</button></div>" +
+      "<div class='chart-wrap' style='margin-top:14px'><canvas id='co-compare-canvas'></canvas></div>" +
+      "<div id='co-compare-table' style='margin-top:12px'></div>" +
+    "</div>";
+
+  $("#co-search").value = CO_TICKER;
+  function doSearch(){
+    var t = ($("#co-search").value||"").trim().toUpperCase();
+    if (!t) return;
+    CO_TICKER = t; lsSet("companiesTicker", t);
+    renderCompanyDetail();
+  }
+  $("#co-search-btn").addEventListener("click", doSearch);
+  $("#co-search").addEventListener("keydown", function(e){ if (e.key === "Enter") doSearch(); });
+
+  renderCompanyDetail();
+  renderCompareChips();
+  renderCompareChart();
+};
+
+function renderCompanyDetail(){
+  var root = $("#co-detail");
+  root.innerHTML = "<div class='card'><p class='muted small'>Loading " + esc(CO_TICKER) + "...</p></div>";
+  getSeries(CO_TICKER).then(function(s){
+    var closes = s.closes, dates = s.dates, volumes = s.volumes;
+    var price = closes[closes.length-1];
+    var chg = closes.length>1 ? ((price/closes[closes.length-2])-1)*100 : null;
+    var window52 = closes.slice(-252);
+    var hi52 = Math.max.apply(null, window52), lo52 = Math.min.apply(null, window52);
+    var avgVol = volumes.slice(-20).reduce(function(a,b){return a+b;},0) / Math.max(1, volumes.slice(-20).length);
+    var rsi = IND.rsi(dates, closes, 14); var rsiVal = rsi[rsi.length-1].p;
+    var mfi = IND.mfi(dates, closes, volumes, 14); var mfiVal = mfi[mfi.length-1].p;
+    var cmf = IND.cmf(dates, closes, volumes, 21);
+    var status = IND.moneyFlowStatus(cmf, 21);
+    var ytdIdx = dates.findIndex(function(d){ return d >= (new Date().getFullYear() + "-01-01"); });
+    var ytdReturn = ytdIdx > 0 ? ((price/closes[ytdIdx])-1)*100 : null;
+    var oneYReturn = closes.length>=252 ? ((price/closes[closes.length-252])-1)*100 : ((price/closes[0])-1)*100;
+    var rets = []; for (var i=1;i<closes.length;i++) rets.push(closes[i]/closes[i-1]-1);
+    var meanRet = rets.reduce(function(a,b){return a+b;},0)/rets.length;
+    var variance = rets.reduce(function(a,b){return a+Math.pow(b-meanRet,2);},0)/rets.length;
+    var annVol = Math.sqrt(variance*252)*100;
+
+    root.innerHTML =
+      "<div class='card'>" +
+        "<div class='flex-between'>" +
+          "<div><h2>" + esc(CO_TICKER) + (s.synthetic ? " <span class='tag'>sample data</span>" : "") + "</h2><p class='muted small'>" + esc(tickerName(CO_TICKER)) + "</p></div>" +
+          "<div style='text-align:right'><div style='font-size:26px;font-weight:800'>" + fmtPrice(price) + "</div><div class='" + pctClass(chg) + "'>" + fmtPct(chg) + " today</div></div>" +
+        "</div>" +
+        "<div class='chart-wrap' style='margin-top:14px'><canvas id='co-price-canvas'></canvas></div>" +
+        "<div class='section-title'>Key Metrics</div>" +
+        "<div class='grid cols-4'>" +
+          "<div class='card'><h3>52W Range</h3><div>" + fmtPrice(lo52) + " -- " + fmtPrice(hi52) + "</div></div>" +
+          "<div class='card'><h3>Avg Vol (20d)</h3><div>" + Math.round(avgVol).toLocaleString() + "</div></div>" +
+          "<div class='card'><h3>RSI(14) / MFI(14)</h3><div>" + fmtNum(rsiVal,1) + " / " + fmtNum(mfiVal,1) + "</div></div>" +
+          "<div class='card'><h3>Money Flow</h3><div><span class='pill " + status.cls + "'>" + status.label + "</span></div></div>" +
+          "<div class='card'><h3>YTD Return</h3><div class='" + pctClass(ytdReturn) + "'>" + fmtPct(ytdReturn) + "</div></div>" +
+          "<div class='card'><h3>1Y Return</h3><div class='" + pctClass(oneYReturn) + "'>" + fmtPct(oneYReturn) + "</div></div>" +
+          "<div class='card'><h3>Annualized Vol</h3><div>" + fmtNum(annVol,1) + "%</div></div>" +
+          "<div class='card'><h3>Add to List</h3><div><button class='btn small ghost' id='co-add-to-list'>Add " + esc(CO_TICKER) + "</button></div></div>" +
+        "</div>" +
+      "</div>";
+
+    new Chart($("#co-price-canvas").getContext("2d"), {
+      type:"line",
+      data:{ labels:dates, datasets:[
+        { label:CO_TICKER, data:closes, borderColor:"#4fd1c5", backgroundColor:"rgba(79,209,197,.10)", fill:true, pointRadius:0, borderWidth:1.6, tension:.1 },
+        { label:"SMA50", data: IND.sma(dates, closes, 50).map(function(x){return x.p;}), borderColor:"#f6ad55", pointRadius:0, borderWidth:1.2, tension:.1 }
+      ]},
+      options:{ maintainAspectRatio:false, scales:{ x:{ ticks:{color:"#93a2bb", maxTicksLimit:8}, grid:{color:"#1b2536"} }, y:{ ticks:{color:"#93a2bb"}, grid:{color:"#1b2536"} } }, plugins:{ legend:{ labels:{color:"#93a2bb", boxWidth:12} } } }
+    });
+
+    $("#co-add-to-list").addEventListener("click", function(){
+      var key = STATE.watchlists.active || Object.keys(STATE.watchlists.lists)[0];
+      if (!key) { alert("Create a watchlist first on the Watchlists tab."); return; }
+      var list = STATE.watchlists.lists[key];
+      if (list.tickers.indexOf(CO_TICKER) === -1) list.tickers.push(CO_TICKER);
+      saveWatchlists();
+      $("#co-add-to-list").textContent = "Added to " + (list.label||key);
+    });
+  }).catch(function(e){
+    console.error("GMR: company detail failed", e);
+    root.innerHTML = "<div class='card'><p class='muted small'>Could not load " + esc(CO_TICKER) + ".</p></div>";
+  });
+}
+
+function renderCompareChips(){
+  var root = $("#co-compare-chips");
+  root.innerHTML = CO_COMPARE.map(function(t){
+    return "<span class='chip active' data-compare-ticker='" + esc(t) + "'>" + esc(t) + " <span class='x'>x</span></span>";
+  }).join("");
+  $all("[data-compare-ticker]", root).forEach(function(chip){
+    chip.addEventListener("click", function(){
+      CO_COMPARE = CO_COMPARE.filter(function(t){ return t !== chip.dataset.compareTicker; });
+      lsSet("companiesCompare", CO_COMPARE);
+      renderCompareChips();
+      renderCompareChart();
+    });
+  });
+  $("#co-compare-add-btn").onclick = function(){
+    var t = ($("#co-compare-add").value||"").trim().toUpperCase();
+    if (!t || CO_COMPARE.indexOf(t) !== -1) return;
+    CO_COMPARE.push(t);
+    lsSet("companiesCompare", CO_COMPARE);
+    $("#co-compare-add").value = "";
+    renderCompareChips();
+    renderCompareChart();
+  };
+}
+
+function renderCompareChart(){
+  var canvas = $("#co-compare-canvas");
+  var tableRoot = $("#co-compare-table");
+  if (!CO_COMPARE.length){ canvas.getContext("2d").clearRect(0,0,canvas.width,canvas.height); tableRoot.innerHTML=""; return; }
+  var colors = ["#4fd1c5","#f6ad55","#5b8cff","#3ecf8e","#f56565","#a78bfa","#f472b6"];
+  Promise.all(CO_COMPARE.map(function(t){ return getSeries(t); })).then(function(seriesList){
+    var maxLen = Math.max.apply(null, seriesList.map(function(s){ return s.dates.length; }));
+    var baseDates = seriesList.filter(function(s){ return s.dates.length===maxLen; })[0].dates;
+    var datasets = seriesList.map(function(s, i){
+      var offset = baseDates.length - s.closes.length;
+      var rebased = baseDates.map(function(d, idx){
+        var si = idx - offset;
+        if (si < 0) return null;
+        return (s.closes[si]/s.closes[0])*100;
+      });
+      return { label:CO_COMPARE[i], data:rebased, borderColor:colors[i%colors.length], pointRadius:0, borderWidth:1.5, tension:.1 };
+    });
+    new Chart(canvas.getContext("2d"), {
+      type:"line", data:{ labels:baseDates, datasets:datasets },
+      options:{ maintainAspectRatio:false, scales:{ x:{ ticks:{color:"#93a2bb", maxTicksLimit:8}, grid:{color:"#1b2536"} }, y:{ ticks:{color:"#93a2bb"}, grid:{color:"#1b2536"} } }, plugins:{ legend:{ labels:{color:"#93a2bb", boxWidth:12} } } }
+    });
+    var html = "<table><thead><tr><th>Ticker</th><th>Price</th><th>1Y Return</th></tr></thead><tbody>";
+    seriesList.forEach(function(s, i){
+      var price = s.closes[s.closes.length-1];
+      var ret = s.closes.length>=252 ? ((price/s.closes[s.closes.length-252])-1)*100 : ((price/s.closes[0])-1)*100;
+      html += "<tr><td>" + esc(CO_COMPARE[i]) + "</td><td>" + fmtPrice(price) + "</td><td class='" + pctClass(ret) + "'>" + fmtPct(ret) + "</td></tr>";
+    });
+    html += "</tbody></table>";
+    tableRoot.innerHTML = html;
+  }).catch(function(e){ console.error("GMR: compare chart failed", e); });
+}
+"""
+
+APP_JS = JS_OPEN + JS_CORE + JS_PROXY + JS_ROUTER + JS_DASHBOARD + JS_WATCHLISTS + JS_COMPANIES + JS_CLOSE
 
 
 if __name__ == "__main__":
