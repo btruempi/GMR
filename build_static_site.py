@@ -206,6 +206,13 @@ tr.row-open td.caret{color:var(--accent)}
 .heat-tile.xl .ht-sym{font-size:18px}
 .heat-tile.sm .ht-sym{font-size:12.5px}
 @media(max-width:560px){ .heat-tile.xl,.heat-tile.lg{grid-column:span 2} }
+.chip.mgmt{gap:8px;padding-right:6px}
+.chip.mgmt > span:first-child{cursor:pointer}
+.chip-x{cursor:pointer;opacity:.6;padding:0 3px;font-weight:800;border-radius:4px}
+.chip-x:hover{opacity:1;background:rgba(255,255,255,.12)}
+.archived-block{margin-top:8px;width:100%}
+.archived-block summary{cursor:pointer;color:var(--muted);font-size:12.5px;padding:4px 0}
+.archived-block summary:hover{color:var(--text)}
 .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0 26px}
 @media(max-width:900px){ .stats-grid{grid-template-columns:repeat(2,1fr)} }
 @media(max-width:560px){ .stats-grid{grid-template-columns:1fr} }
@@ -392,6 +399,13 @@ if (!STATE.indexes[STATE.activeIndex]) STATE.activeIndex = Object.keys(STATE.ind
 STATE.constituents = (STATE.indexes[STATE.activeIndex] || {}).constituents || STATE.constituents;
 
 function saveIndexes(){ lsSet("indexes", STATE.indexes); lsSet("activeIndex", STATE.activeIndex); }
+function activeIndexKeys(){ return Object.keys(STATE.indexes).filter(function(k){ return !STATE.indexes[k].archived; }); }
+function archiveIndex(key){
+  if (key === "nuclear"){ alert("The featured Nuclear index cannot be archived."); return; }
+  STATE.indexes[key].archived = true;
+  if (STATE.activeIndex === key) setActiveIndex(activeIndexKeys()[0] || "nuclear");
+  else saveIndexes();
+}
 function saveConstituents(){ // active index edited in place -> persist indexes
   if (STATE.indexes[STATE.activeIndex]) STATE.indexes[STATE.activeIndex].constituents = STATE.constituents;
   saveIndexes();
@@ -1056,7 +1070,7 @@ RENDERERS.dashboard = function(root){
     "</div>" +
     "<div class='grid cols-2'>" +
       "<div class='card'><div class='flex-between'><h3 style='margin:0'>Featured Index</h3>" +
-        "<select id='dash-index-select' style='width:auto'>" + Object.keys(STATE.indexes).map(function(k){ return "<option value='" + esc(k) + "'" + (k===STATE.activeIndex?" selected":"") + ">" + esc(STATE.indexes[k].label||k) + "</option>"; }).join("") + "</select></div>" +
+        "<select id='dash-index-select' style='width:auto'>" + activeIndexKeys().map(function(k){ return "<option value='" + esc(k) + "'" + (k===STATE.activeIndex?" selected":"") + ">" + esc(STATE.indexes[k].label||k) + "</option>"; }).join("") + "</select></div>" +
         "<div class='chart-wrap' style='margin-top:10px'><canvas id='dash-index-chart'></canvas></div></div>" +
       "<div class='card'><h3>Sector Weights</h3><div class='chart-wrap'><canvas id='dash-sector-donut'></canvas></div></div>" +
     "</div>" +
@@ -1140,7 +1154,7 @@ function renderDashboardKPIs(){
 
 function renderWatchlistSummary(root){
   var lists = STATE.watchlists.lists || {};
-  var keys = Object.keys(lists);
+  var keys = activeWatchlistKeys();
   if (!keys.length){ root.innerHTML = "<p class='muted'>No watchlists yet.</p>"; return; }
   var html = "<table><thead><tr><th>List</th><th>Tickers</th><th></th></tr></thead><tbody>";
   keys.forEach(function(k){
@@ -1271,9 +1285,8 @@ function openWatchlistMenu(anchor, ticker, onAdd){
 function activeListKey(){
   var override = lsGet("activeWatchlist", null);
   if (override && STATE.watchlists.lists[override]) { lsSet("activeWatchlist", null); return override; }
-  var keys = Object.keys(STATE.watchlists.lists);
-  if (STATE.watchlists.active && STATE.watchlists.lists[STATE.watchlists.active]) return STATE.watchlists.active;
-  return keys[0];
+  if (STATE.watchlists.active && STATE.watchlists.lists[STATE.watchlists.active] && !STATE.watchlists.lists[STATE.watchlists.active].archived) return STATE.watchlists.active;
+  return activeWatchlistKeys()[0] || Object.keys(STATE.watchlists.lists)[0];
 }
 
 RENDERERS.watchlists = function(root){
@@ -1313,22 +1326,65 @@ RENDERERS.watchlists = function(root){
   renderActiveListPanel();
 };
 
+function activeWatchlistKeys(){ return Object.keys(STATE.watchlists.lists).filter(function(k){ return !STATE.watchlists.lists[k].archived; }); }
+function deleteWatchlist(key){
+  delete STATE.watchlists.lists[key];
+  if (STATE.watchlists.active === key) STATE.watchlists.active = activeWatchlistKeys()[0] || null;
+  saveWatchlists();
+}
+function openListManageMenu(anchor, key){
+  closeWatchlistMenu();
+  var menu = document.createElement("div"); menu.className = "wl-menu"; menu.id = "wl-menu";
+  menu.innerHTML = "<div class='wm-head'>" + esc(STATE.watchlists.lists[key].label||key) + "</div>" +
+    "<div class='wm-item' data-act='archive'>&#128230; Archive</div>" +
+    "<div class='wm-item wm-new' data-act='delete'>&#128465; Delete permanently</div>";
+  document.body.appendChild(menu);
+  var r = anchor.getBoundingClientRect();
+  menu.style.top = (r.bottom + window.scrollY + 4) + "px";
+  menu.style.left = Math.max(8, Math.min(r.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - (menu.offsetWidth||200) - 8)) + "px";
+  menu.querySelector("[data-act='archive']").addEventListener("click", function(){
+    STATE.watchlists.lists[key].archived = true;
+    if (STATE.watchlists.active === key) STATE.watchlists.active = activeWatchlistKeys()[0] || key;
+    saveWatchlists(); closeWatchlistMenu(); toast("Archived <b>" + esc(STATE.watchlists.lists[key].label||key) + "</b>"); showTab("watchlists");
+  });
+  menu.querySelector("[data-act='delete']").addEventListener("click", function(){
+    closeWatchlistMenu();
+    if (confirm("Permanently delete watchlist \"" + (STATE.watchlists.lists[key].label||key) + "\"?")){ deleteWatchlist(key); showTab("watchlists"); }
+  });
+  menu._outside = function(e){ if (!menu.contains(e.target) && e.target!==anchor && !anchor.contains(e.target)) closeWatchlistMenu(); };
+  setTimeout(function(){ document.addEventListener("mousedown", menu._outside); }, 0);
+}
 function renderListChips(){
   var root = $("#wl-list-chips");
   var lists = STATE.watchlists.lists;
-  var keys = Object.keys(lists);
-  if (!keys.length){ root.innerHTML = "<span class='muted small'>No lists yet -- clone a preset below to get started.</span>"; return; }
-  root.innerHTML = keys.map(function(k){
+  var activeKeys = activeWatchlistKeys();
+  var archivedKeys = Object.keys(lists).filter(function(k){ return lists[k].archived; });
+  if (!activeKeys.length && !archivedKeys.length){ root.innerHTML = "<span class='muted small'>No lists yet -- clone a preset below to get started.</span>"; return; }
+  var html = activeKeys.map(function(k){
     var active = k === STATE.watchlists.active;
-    return "<span class='chip" + (active?" active":"") + "' data-list-key='" + esc(k) + "'>" + esc(lists[k].label||k) + "</span>";
+    return "<span class='chip mgmt" + (active?" active":"") + "'><span data-list-key='" + esc(k) + "'>" + esc(lists[k].label||k) + "</span>" +
+      "<span class='chip-x' data-list-menu='" + esc(k) + "' title='Manage'>&#8942;</span></span>";
   }).join("");
-  $all("[data-list-key]", root).forEach(function(chip){
-    chip.addEventListener("click", function(){
-      STATE.watchlists.active = chip.dataset.listKey;
-      saveWatchlists();
-      WL_EXPANDED = null;
-      showTab("watchlists");
-    });
+  if (archivedKeys.length){
+    html += "<details class='archived-block'><summary>Archived (" + archivedKeys.length + ")</summary><div class='row' style='margin-top:8px'>" +
+      archivedKeys.map(function(k){
+        return "<span class='chip muted'>" + esc(lists[k].label||k) +
+          " <button class='btn small ghost' data-list-restore='" + esc(k) + "'>Restore</button>" +
+          "<button class='btn small ghost' data-list-del='" + esc(k) + "'>Delete</button></span>";
+      }).join("") + "</div></details>";
+  }
+  root.innerHTML = html;
+  $all("[data-list-key]", root).forEach(function(el){
+    el.addEventListener("click", function(){ STATE.watchlists.active = el.dataset.listKey; saveWatchlists(); WL_EXPANDED = null; showTab("watchlists"); });
+  });
+  $all("[data-list-menu]", root).forEach(function(el){
+    el.addEventListener("click", function(e){ e.stopPropagation(); openListManageMenu(el, el.dataset.listMenu); });
+  });
+  $all("[data-list-restore]", root).forEach(function(b){
+    b.addEventListener("click", function(){ lists[b.dataset.listRestore].archived = false; saveWatchlists(); showTab("watchlists"); });
+  });
+  $all("[data-list-del]", root).forEach(function(b){
+    b.addEventListener("click", function(){ if (confirm("Permanently delete this watchlist?")){ deleteWatchlist(b.dataset.listDel); showTab("watchlists"); } });
   });
 }
 
@@ -2067,12 +2123,16 @@ function renderCompareChips(){
   };
 }
 
+var CO_COMPARE_CHART = null;
 function renderCompareChart(){
   var canvas = $("#co-compare-canvas");
   var tableRoot = $("#co-compare-table");
-  if (!CO_COMPARE.length){ canvas.getContext("2d").clearRect(0,0,canvas.width,canvas.height); tableRoot.innerHTML=""; return; }
+  if (!canvas) return;
+  if (CO_COMPARE_CHART){ CO_COMPARE_CHART.destroy(); CO_COMPARE_CHART = null; }
+  if (!CO_COMPARE.length){ tableRoot.innerHTML=""; return; }
   var colors = ["#4fd1c5","#f6ad55","#5b8cff","#3ecf8e","#f56565","#a78bfa","#f472b6"];
   Promise.all(CO_COMPARE.map(function(t){ return getSeries(t); })).then(function(seriesList){
+    if (!$("#co-compare-canvas")) return; // navigated away
     var maxLen = Math.max.apply(null, seriesList.map(function(s){ return s.dates.length; }));
     var baseDates = seriesList.filter(function(s){ return s.dates.length===maxLen; })[0].dates;
     var datasets = seriesList.map(function(s, i){
@@ -2084,7 +2144,8 @@ function renderCompareChart(){
       });
       return { label:CO_COMPARE[i], data:rebased, borderColor:colors[i%colors.length], pointRadius:0, borderWidth:1.5, tension:.1 };
     });
-    new Chart(canvas.getContext("2d"), {
+    if (CO_COMPARE_CHART) CO_COMPARE_CHART.destroy();
+    CO_COMPARE_CHART = new Chart(canvas.getContext("2d"), {
       type:"line", data:{ labels:baseDates, datasets:datasets },
       options:{ maintainAspectRatio:false, scales:{ x:{ ticks:{color:"#93a2bb", maxTicksLimit:8}, grid:{color:"#1b2536"} }, y:{ ticks:{color:"#93a2bb"}, grid:{color:"#1b2536"} } }, plugins:{ legend:{ labels:{color:"#93a2bb", boxWidth:12} } } }
     });
@@ -2381,7 +2442,7 @@ RENDERERS.backtest = function(root){
   root.innerHTML =
     "<div class='card'>" +
       "<div class='flex-between'><h2>Backtest</h2>" +
-        "<select id='bt-index-select' style='width:auto'>" + Object.keys(STATE.indexes).map(function(k){ return "<option value='" + esc(k) + "'" + (k===STATE.activeIndex?" selected":"") + ">" + esc(STATE.indexes[k].label||k) + " Index</option>"; }).join("") + "</select></div>" +
+        "<select id='bt-index-select' style='width:auto'>" + activeIndexKeys().map(function(k){ return "<option value='" + esc(k) + "'" + (k===STATE.activeIndex?" selected":"") + ">" + esc(STATE.indexes[k].label||k) + " Index</option>"; }).join("") + "</select></div>" +
       "<p class='muted small'>Composite is the <b>" + esc(getActiveIndex().label||"") + "</b> index (weighted by constituent), vs your selected benchmarks.</p>" +
       "<div class='row'><label style='margin:0'>Lookback:</label>" +
         Object.keys(LOOKBACK_YEARS).map(function(k){ return "<span class='chip" + (BT_LOOKBACK===k?" active":"") + "' data-lookback='" + k + "'>" + k + "</span>"; }).join("") +
@@ -3231,7 +3292,7 @@ RENDERERS.indexes = function(root){
       "<div class='grid cols-4'>" +
         "<div><label>Name</label><input id='idx-name' type='text' placeholder='e.g. My Semis Index'></div>" +
         "<div><label>Source</label><select id='idx-source'>" +
-          "<optgroup label='Your watchlists'>" + Object.keys(STATE.watchlists.lists).map(function(k){ return "<option value='wl:" + esc(k) + "'>" + esc(STATE.watchlists.lists[k].label||k) + "</option>"; }).join("") + "</optgroup>" +
+          "<optgroup label='Your watchlists'>" + activeWatchlistKeys().map(function(k){ return "<option value='wl:" + esc(k) + "'>" + esc(STATE.watchlists.lists[k].label||k) + "</option>"; }).join("") + "</optgroup>" +
           "<optgroup label='Sector presets'>" + STATE.presets.map(function(p){ return "<option value='ps:" + esc(p.key) + "'>" + esc(p.label) + "</option>"; }).join("") + "</optgroup>" +
         "</select></div>" +
         "<div><label>Weighting</label><select id='idx-method'><option value='market-cap'>Market cap</option><option value='equal'>Equal weight</option></select></div>" +
@@ -3279,7 +3340,8 @@ function createIndexFromForm(){
 
 function renderIndexCards(){
   var root = $("#idx-list");
-  var keys = Object.keys(STATE.indexes);
+  var keys = activeIndexKeys();
+  var archivedKeys = Object.keys(STATE.indexes).filter(function(k){ return STATE.indexes[k].archived; });
   root.innerHTML = keys.map(function(k){
     var idx = STATE.indexes[k];
     var active = k === STATE.activeIndex;
@@ -3291,15 +3353,22 @@ function renderIndexCards(){
         (active ? "" : "<button class='btn small' data-idx-activate='" + esc(k) + "'>Make active</button>") +
         "<button class='btn small secondary' data-idx-backtest='" + esc(k) + "'>Backtest</button>" +
         "<button class='btn small ghost' data-idx-heatmap='" + esc(k) + "'>Heatmap</button>" +
+        (k==="nuclear" ? "" : "<button class='btn small ghost' data-idx-archive='" + esc(k) + "'>Archive</button>") +
         (k==="nuclear" ? "" : "<button class='btn small ghost' data-idx-delete='" + esc(k) + "'>Delete</button>") +
       "</div></div>";
-  }).join("");
+  }).join("") +
+  (archivedKeys.length ? "<div class='card' style='grid-column:1/-1'><details class='archived-block'><summary>Archived indexes (" + archivedKeys.length + ")</summary><div class='row' style='margin-top:8px'>" +
+    archivedKeys.map(function(k){ return "<span class='chip muted'>" + esc(STATE.indexes[k].label||k) + " <button class='btn small ghost' data-idx-restore='" + esc(k) + "'>Restore</button><button class='btn small ghost' data-idx-del2='" + esc(k) + "'>Delete</button></span>"; }).join("") +
+    "</div></details></div>" : "");
 
   keys.forEach(function(k){ renderCompositeMini($("#idxc-" + k), STATE.indexes[k].constituents); });
   $all("[data-idx-activate]", root).forEach(function(b){ b.addEventListener("click", function(){ setActiveIndex(b.dataset.idxActivate); toast("Active index: <b>" + esc(STATE.indexes[b.dataset.idxActivate].label) + "</b>"); showTab("indexes"); }); });
   $all("[data-idx-backtest]", root).forEach(function(b){ b.addEventListener("click", function(){ setActiveIndex(b.dataset.idxBacktest); showTab("backtest"); }); });
   $all("[data-idx-heatmap]", root).forEach(function(b){ b.addEventListener("click", function(){ lsSet("heatmapSource", "idx:" + b.dataset.idxHeatmap); showTab("heatmap"); }); });
+  $all("[data-idx-archive]", root).forEach(function(b){ b.addEventListener("click", function(){ archiveIndex(b.dataset.idxArchive); toast("Archived index"); showTab("indexes"); }); });
   $all("[data-idx-delete]", root).forEach(function(b){ b.addEventListener("click", function(){ if(confirm("Delete this index?")){ deleteIndex(b.dataset.idxDelete); showTab("indexes"); } }); });
+  $all("[data-idx-restore]", root).forEach(function(b){ b.addEventListener("click", function(){ STATE.indexes[b.dataset.idxRestore].archived=false; saveIndexes(); showTab("indexes"); }); });
+  $all("[data-idx-del2]", root).forEach(function(b){ b.addEventListener("click", function(){ if(confirm("Permanently delete this index?")){ deleteIndex(b.dataset.idxDel2); showTab("indexes"); } }); });
 }
 
 function renderCompositeMini(canvas, cons){
@@ -3334,8 +3403,8 @@ var HM_SIZE = [["cap","Size by market cap"],["equal","Equal size"]];
 
 function heatSources(){
   var out = [];
-  Object.keys(STATE.indexes).forEach(function(k){ out.push({id:"idx:"+k, label:"Index: "+(STATE.indexes[k].label||k), tickers:(STATE.indexes[k].constituents||[]).map(function(c){return c.ticker;})}); });
-  Object.keys(STATE.watchlists.lists).forEach(function(k){ out.push({id:"wl:"+k, label:"Watchlist: "+(STATE.watchlists.lists[k].label||k), tickers:(STATE.watchlists.lists[k].tickers||[]).slice()}); });
+  activeIndexKeys().forEach(function(k){ out.push({id:"idx:"+k, label:"Index: "+(STATE.indexes[k].label||k), tickers:(STATE.indexes[k].constituents||[]).map(function(c){return c.ticker;})}); });
+  activeWatchlistKeys().forEach(function(k){ out.push({id:"wl:"+k, label:"Watchlist: "+(STATE.watchlists.lists[k].label||k), tickers:(STATE.watchlists.lists[k].tickers||[]).slice()}); });
   STATE.presets.forEach(function(p){ out.push({id:"ps:"+p.key, label:"Vertical: "+p.label, tickers:p.tickers.slice()}); });
   return out;
 }
