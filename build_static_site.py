@@ -178,6 +178,20 @@ tr.row-open td.caret{color:var(--accent)}
 .sr-add:hover{background:var(--accent);color:#04211d;border-color:var(--accent)}
 .sr-add.added{color:var(--up);border-color:var(--up)}
 .sr-msg{padding:10px 12px;color:var(--muted);font-size:12.5px}
+.wl-menu{position:absolute;z-index:200;min-width:220px;max-width:280px;background:var(--panel);
+  border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.55);overflow:hidden;padding:4px}
+.wl-menu .wm-head{padding:7px 10px 5px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.wm-item{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;
+  cursor:pointer;font-size:13px}
+.wm-item:hover{background:var(--panel2)}
+.wm-item .wm-meta{font-size:11px;color:var(--muted)}
+.wm-item.has{color:var(--muted)}
+.wm-item.has .wm-meta{color:var(--up)}
+.wm-item.wm-new{color:var(--accent);font-weight:700;border-top:1px solid var(--border);margin-top:2px}
+.wl-toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);
+  border:1px solid var(--accent);color:var(--text);padding:10px 16px;border-radius:8px;font-size:13px;
+  z-index:300;box-shadow:0 8px 30px rgba(0,0,0,.5);opacity:0;transition:opacity .2s}
+.wl-toast.show{opacity:1}
 .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0 26px}
 @media(max-width:900px){ .stats-grid{grid-template-columns:repeat(2,1fr)} }
 @media(max-width:560px){ .stats-grid{grid-template-columns:1fr} }
@@ -867,13 +881,7 @@ function wireTopSearch(){
     showTab("companies");
   }
   function addToWatchlist(sym, btn){
-    var key = STATE.watchlists.active || Object.keys(STATE.watchlists.lists)[0];
-    if (!key){ alert("Create a watchlist first on the Watchlists tab."); return; }
-    var list = STATE.watchlists.lists[key];
-    sym = sym.toUpperCase();
-    if (list.tickers.indexOf(sym) === -1) list.tickers.push(sym);
-    saveWatchlists();
-    if (btn){ btn.textContent = "Added"; btn.className = "sr-add added"; }
+    openWatchlistMenu(btn, sym, function(){ btn.textContent = "Added"; btn.className = "sr-add added"; });
   }
   function render(items, note){
     results = items || [];
@@ -930,7 +938,9 @@ function wireTopSearch(){
     var raw = (input.value||"").trim();
     if (raw) openCompany(raw.split(/[\s-]/)[0]);
   });
-  document.addEventListener("click", function(e){ if (wrap && !wrap.contains(e.target)) close(); });
+  document.addEventListener("click", function(e){
+    if (wrap && !wrap.contains(e.target) && !(e.target.closest && e.target.closest(".wl-menu"))) close();
+  });
 }
 
 function init(){
@@ -1123,6 +1133,71 @@ JS_WATCHLISTS = r"""
 // ---- Watchlists tab -------------------------------------------------------
 var WL_EXPANDED = null;
 var DEFAULT_INDICATORS = {sma:true, ema:false, rsi:true, bollinger:false, macd:true, vwap:false};
+
+// ---- shared "add to watchlist" picker (used by Companies + search) --------
+function toast(msg){
+  var t = document.createElement("div");
+  t.className = "wl-toast";
+  t.innerHTML = msg;
+  document.body.appendChild(t);
+  requestAnimationFrame(function(){ t.className = "wl-toast show"; });
+  setTimeout(function(){ t.className = "wl-toast"; setTimeout(function(){ if(t.parentNode) t.parentNode.removeChild(t); }, 250); }, 2200);
+}
+function closeWatchlistMenu(){
+  var m = document.getElementById("wl-menu");
+  if (m){ if (m._outside) document.removeEventListener("mousedown", m._outside); m.remove(); }
+}
+// anchor: element to position under; ticker: symbol; onAdd(key,list) callback.
+function openWatchlistMenu(anchor, ticker, onAdd){
+  ticker = String(ticker || "").toUpperCase();
+  if (!ticker) return;
+  closeWatchlistMenu();
+  var lists = STATE.watchlists.lists || {};
+  var keys = Object.keys(lists);
+  var menu = document.createElement("div");
+  menu.className = "wl-menu"; menu.id = "wl-menu";
+  var rows = keys.map(function(k){
+    var has = (lists[k].tickers || []).indexOf(ticker) !== -1;
+    return "<div class='wm-item" + (has?" has":"") + "' data-wl='" + esc(k) + "'>" +
+      "<span>" + esc(lists[k].label || k) + "</span>" +
+      "<span class='wm-meta'>" + (has ? "&#10003; added" : (lists[k].tickers||[]).length + " names") + "</span></div>";
+  }).join("");
+  menu.innerHTML = "<div class='wm-head'>Add " + esc(ticker) + " to</div>" + rows +
+    "<div class='wm-item wm-new' data-wl-new='1'>+ New watchlist</div>";
+  document.body.appendChild(menu);
+
+  // position under the anchor, clamped to the viewport
+  var r = anchor.getBoundingClientRect();
+  var mw = menu.offsetWidth || 240;
+  var left = Math.min(r.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - mw - 8);
+  menu.style.top = (r.bottom + window.scrollY + 4) + "px";
+  menu.style.left = Math.max(8, left) + "px";
+
+  function pick(key){
+    var list = STATE.watchlists.lists[key];
+    if (list.tickers.indexOf(ticker) === -1) list.tickers.push(ticker);
+    STATE.watchlists.active = key;
+    saveWatchlists();
+    closeWatchlistMenu();
+    toast("Added <b>" + esc(ticker) + "</b> to <b>" + esc(list.label || key) + "</b>");
+    if (onAdd) onAdd(key, list);
+  }
+  $all("[data-wl]", menu).forEach(function(el){ el.addEventListener("click", function(){ pick(el.dataset.wl); }); });
+  var newEl = menu.querySelector("[data-wl-new]");
+  newEl.addEventListener("click", function(){
+    var name = prompt("Name for the new watchlist:");
+    if (!name) return;
+    name = name.trim(); if (!name) return;
+    var key = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || uid();
+    if (!STATE.watchlists.lists[key]) STATE.watchlists.lists[key] = {label:name, desc:"", tickers:[], indicators: Object.assign({}, DEFAULT_INDICATORS)};
+    pick(key);
+  });
+  // if there are no lists yet, jump straight to creating one
+  if (!keys.length){ closeWatchlistMenu(); newEl = null; var nm = prompt("Name your first watchlist:"); if (nm){ var k = nm.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"")||uid(); STATE.watchlists.lists[k]={label:nm,desc:"",tickers:[ticker],indicators:Object.assign({},DEFAULT_INDICATORS)}; STATE.watchlists.active=k; saveWatchlists(); toast("Added <b>"+esc(ticker)+"</b> to <b>"+esc(nm)+"</b>"); if(onAdd) onAdd(k, STATE.watchlists.lists[k]); } return; }
+
+  menu._outside = function(e){ if (!menu.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) closeWatchlistMenu(); };
+  setTimeout(function(){ document.addEventListener("mousedown", menu._outside); }, 0);
+}
 
 function activeListKey(){
   var override = lsGet("activeWatchlist", null);
@@ -1867,7 +1942,7 @@ function renderCompanyDetail(){
           "</div>" +
         "</div>" +
         "<div id='co-adv-chart' style='margin-top:14px'></div>" +
-        "<div class='cta-row'><button class='btn small ghost' id='co-add-to-list'>Add " + esc(CO_TICKER) + " to watchlist</button></div>" +
+        "<div class='cta-row'><button class='btn small ghost' id='co-add-to-list'>+ Add " + esc(CO_TICKER) + " to watchlist &#9662;</button></div>" +
         "<div class='section-title'>Statistics</div>" +
         statsGrid +
         overview +
@@ -1889,13 +1964,9 @@ function renderCompanyDetail(){
     renderAdvancedChart($("#co-adv-chart", root), CO_TICKER, s, "advChart_companies");
 
     var addBtn = $("#co-add-to-list", root);
-    if (addBtn) addBtn.addEventListener("click", function(){
-      var key = STATE.watchlists.active || Object.keys(STATE.watchlists.lists)[0];
-      if (!key) { alert("Create a watchlist first on the Watchlists tab."); return; }
-      var list = STATE.watchlists.lists[key];
-      if (list.tickers.indexOf(CO_TICKER) === -1) list.tickers.push(CO_TICKER);
-      saveWatchlists();
-      addBtn.textContent = "Added to " + (list.label||key);
+    if (addBtn) addBtn.addEventListener("click", function(e){
+      e.stopPropagation();
+      openWatchlistMenu(addBtn, CO_TICKER, function(key, list){ addBtn.textContent = "Added to " + (list.label||key); });
     });
   }).catch(function(e){
     console.error("GMR: company detail failed", e);
