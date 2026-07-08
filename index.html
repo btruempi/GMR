@@ -760,6 +760,7 @@ function getSeries(ticker, range){
 var TABS = [
   {key:"dashboard",   label:"Dashboard"},
   {key:"heatmap",     label:"Heatmap"},
+  {key:"moneyflow",   label:"Money Flow"},
   {key:"watchlists",  label:"Watchlists"},
   {key:"indexes",     label:"Indexes"},
   {key:"companies",   label:"Companies"},
@@ -3360,6 +3361,190 @@ function renderHeatmapGrid(tickers, period, sizeMode){
     root.innerHTML = html + "<p class='footer-note'>Change over " + esc(period) + ". Market-cap sizing uses baked fundamentals; tickers without them show a default size.</p>";
     $all("[data-heat]", root).forEach(function(el){ el.addEventListener("click", function(){ CO_TICKER = el.dataset.heat; lsSet("companiesTicker", CO_TICKER); showTab("companies"); }); });
   }).catch(function(e){ console.error("GMR: heatmap failed", e); root.innerHTML = "<div class='card'><p class='muted small'>Could not build the heatmap right now.</p></div>"; });
+}
+
+// ---- Money Flow: financial knowledge graph (SEC-sourced) ------------------
+var KG_OUT_META = [
+  ["cogs","Cost of Revenue","#f56565"],
+  ["rnd","R&D","#f6ad55"],
+  ["sga","SG&A","#f6ad55"],
+  ["interest","Interest","#f56565"],
+  ["taxes","Taxes","#f56565"],
+  ["net","Net Income","#3ecf8e"],
+  ["capex","Capex","#5b8cff"],
+  ["dividends","Dividends","#a78bfa"],
+  ["buybacks","Buybacks","#a78bfa"]
+];
+
+RENDERERS.moneyflow = function(root){
+  var mode = lsGet("kgMode", "company");
+  var ticker = lsGet("kgTicker", CO_TICKER || "NVDA");
+  var sources = heatSources();
+  var basket = lsGet("kgBasket", "idx:" + STATE.activeIndex);
+  if (!sources.some(function(s){ return s.id===basket; })) basket = sources[0] ? sources[0].id : "";
+
+  root.innerHTML =
+    "<div class='card'>" +
+      "<div class='flex-between'><div><h2>Money Flow &mdash; Financial Knowledge Graph</h2>" +
+        "<p class='muted small'>A node-and-edge view of where a company&#39;s money comes from and where it goes, built from its latest annual <b>SEC filing</b> (10-K/20-F/40-F via the SEC XBRL API). Or switch to the basket view to see where market money is flowing across a group.</p></div></div>" +
+      "<div class='row'>" +
+        "<div class='seg' id='kg-mode'><button data-kg='company'" + (mode==="company"?" class='on'":"") + ">Company flow</button><button data-kg='basket'" + (mode==="basket"?" class='on'":"") + ">Basket network</button></div>" +
+        (mode==="company"
+          ? "<div><label>Ticker</label><input id='kg-ticker' type='text' value='" + esc(ticker) + "' style='width:120px;text-transform:uppercase'></div><div style='display:flex;align-items:flex-end'><button class='btn small' id='kg-load'>Show</button></div>"
+          : "<div><label>Basket</label><select id='kg-basket'>" + sources.map(function(s){ return "<option value='" + esc(s.id) + "'" + (s.id===basket?" selected":"") + ">" + esc(s.label) + "</option>"; }).join("") + "</select></div>") +
+      "</div>" +
+    "</div>" +
+    "<div class='card' id='kg-canvas'><p class='muted small'>Loading...</p></div>";
+
+  $all("#kg-mode button", root).forEach(function(b){ b.addEventListener("click", function(){ lsSet("kgMode", b.getAttribute("data-kg")); showTab("moneyflow"); }); });
+  if (mode==="company"){
+    var load = function(){ var t=($("#kg-ticker").value||"").trim().toUpperCase(); if(t){ lsSet("kgTicker", t); renderCompanyFlow(t); } };
+    $("#kg-load").addEventListener("click", load);
+    $("#kg-ticker").addEventListener("keydown", function(e){ if(e.key==="Enter") load(); });
+    renderCompanyFlow(ticker);
+  } else {
+    $("#kg-basket").addEventListener("change", function(e){ lsSet("kgBasket", e.target.value); renderBasketNetwork(e.target.value); });
+    renderBasketNetwork(basket);
+  }
+};
+
+function renderCompanyFlow(ticker){
+  var root = $("#kg-canvas");
+  root.innerHTML = "<p class='muted small'>Loading SEC filing data for " + esc(ticker) + "...</p>";
+  fetch("data/sec/" + encodeURIComponent(ticker) + ".json", {cache:"default"})
+    .then(function(r){ if(!r.ok) throw new Error("no SEC data"); return r.json(); })
+    .then(function(d){ drawCompanyFlow(root, ticker, d); })
+    .catch(function(){
+      root.innerHTML = "<p class='muted small'>No SEC money-flow data for <b>" + esc(ticker) + "</b>. This is baked for tracked US filers " +
+        "(foreign filers like some ADRs, and tickers outside the tracked set, may not report US-GAAP revenue). Try a large US name like NVDA, MSFT, or LLY.</p>";
+    });
+}
+
+function drawCompanyFlow(root, ticker, d){
+  var rev = (d["in"]||{}).revenue || 0;
+  var outs = KG_OUT_META.map(function(m){
+    var val = m[0]==="net" ? (d.net||0) : ((d.out||{})[m[0]]||0);
+    return { key:m[0], label:m[1], color:m[2], val:val };
+  }).filter(function(o){ return o.val && o.val > 0; });
+  if (!rev){ root.innerHTML = "<p class='muted small'>No revenue reported for " + esc(ticker) + ".</p>"; return; }
+  var maxOut = Math.max.apply(null, outs.map(function(o){ return o.val; }).concat([rev]));
+
+  var W = 960, H = Math.max(360, 70 + outs.length*54), pad = 20;
+  var revY = H/2, cx = 300, coW = 150, coH = 90, coY = H/2 - coH/2, coX = cx;
+  var rightX = 640, nodeW = 250;
+  var slotH = (H - 2*pad) / outs.length;
+  function lw(v){ return Math.max(2, (v/maxOut) * 46); }
+  var svg = "<svg viewBox='0 0 " + W + " " + H + "' width='100%' style='max-height:" + H + "px'>";
+
+  // links company -> each out node
+  outs.forEach(function(o, i){
+    var y = pad + slotH*i + slotH/2;
+    var x1 = coX + coW, x2 = rightX;
+    svg += "<path d='M" + x1 + "," + revY + " C" + (x1+90) + "," + revY + " " + (x2-90) + "," + y + " " + x2 + "," + y + "' fill='none' stroke='" + o.color + "' stroke-opacity='.35' stroke-width='" + lw(o.val) + "'/>";
+  });
+  // revenue -> company link
+  svg += "<path d='M120," + revY + " C200," + revY + " 220," + revY + " " + coX + "," + revY + "' fill='none' stroke='#3ecf8e' stroke-opacity='.4' stroke-width='" + lw(rev) + "'/>";
+
+  // revenue node (money in)
+  svg += "<g><rect x='20' y='" + (revY-34) + "' width='100' height='68' rx='8' fill='rgba(62,207,142,.18)' stroke='#3ecf8e'/>" +
+    "<text x='70' y='" + (revY-8) + "' text-anchor='middle' fill='#e7edf7' font-size='13' font-weight='700'>Revenue</text>" +
+    "<text x='70' y='" + (revY+12) + "' text-anchor='middle' fill='#3ecf8e' font-size='13' font-weight='700'>$" + fmtBigPlain(rev) + "</text></g>";
+  // company node
+  svg += "<g><rect x='" + coX + "' y='" + coY + "' width='" + coW + "' height='" + coH + "' rx='10' fill='var(--panel2)' stroke='#4fd1c5' stroke-width='1.5'/>" +
+    "<text x='" + (coX+coW/2) + "' y='" + (coY+38) + "' text-anchor='middle' fill='#e7edf7' font-size='17' font-weight='800'>" + esc(ticker) + "</text>" +
+    "<text x='" + (coX+coW/2) + "' y='" + (coY+60) + "' text-anchor='middle' fill='#93a2bb' font-size='11'>FY " + esc((d.fy||"").slice(0,4)) + "</text></g>";
+  // out nodes
+  outs.forEach(function(o, i){
+    var y = pad + slotH*i + slotH/2;
+    var pct = rev ? (o.val/rev*100) : 0;
+    svg += "<g class='kg-node' style='cursor:default'>" +
+      "<rect x='" + rightX + "' y='" + (y-18) + "' width='" + nodeW + "' height='36' rx='7' fill='" + o.color + "' fill-opacity='.16' stroke='" + o.color + "' stroke-opacity='.6'/>" +
+      "<text x='" + (rightX+12) + "' y='" + (y+5) + "' fill='#e7edf7' font-size='12.5' font-weight='700'>" + esc(o.label) + "</text>" +
+      "<text x='" + (rightX+nodeW-12) + "' y='" + (y+5) + "' text-anchor='end' fill='#e7edf7' font-size='12.5'>$" + fmtBigPlain(o.val) + " &#183; " + pct.toFixed(0) + "%</text></g>";
+  });
+  svg += "</svg>";
+
+  root.innerHTML =
+    "<div class='flex-between'><h3 style='margin:0'>" + esc(d.name||ticker) + " &mdash; money flow (FY " + esc((d.fy||"").slice(0,4)) + ")</h3>" +
+      "<button class='btn small ghost' id='kg-open-co'>Open " + esc(ticker) + " &rarr;</button></div>" +
+    "<div style='overflow-x:auto'>" + svg + "</div>" +
+    "<p class='footer-note'>Money in (revenue) on the left flows through " + esc(ticker) + " to its cost, investment, and capital-return allocations on the right. " +
+      "Percentages are of revenue. Income-statement items (cost of revenue, R&amp;D, SG&amp;A, interest, taxes, net income) and cash-flow items " +
+      "(capex, dividends, buybacks) are both shown. Source: SEC XBRL company facts, latest annual filing.</p>";
+  $("#kg-open-co").addEventListener("click", function(){ CO_TICKER = ticker; lsSet("companiesTicker", ticker); showTab("companies"); });
+}
+
+// compact $ for SVG labels (no leading $)
+function fmtBigPlain(v){
+  var a = Math.abs(v);
+  if (a >= 1e12) return (v/1e12).toFixed(1) + "T";
+  if (a >= 1e9) return (v/1e9).toFixed(1) + "B";
+  if (a >= 1e6) return (v/1e6).toFixed(0) + "M";
+  return String(Math.round(v));
+}
+
+function renderBasketNetwork(sourceId){
+  var root = $("#kg-canvas");
+  var src = heatSources().filter(function(s){ return s.id===sourceId; })[0];
+  if (!src || !src.tickers.length){ root.innerHTML = "<p class='muted small'>Empty basket.</p>"; return; }
+  root.innerHTML = "<p class='muted small'>Building network...</p>";
+  Promise.all(src.tickers.map(function(t){ return getSeries(t).then(function(s){ return {t:t, s:s}; }); })).then(function(rows){
+    // node = company; color by money-flow (CMF), size by market cap; clustered by sector
+    var bySector = {};
+    rows.forEach(function(r){
+      var f = r.s.fundamentals || {};
+      var sector = f.sector || "Other";
+      var cmf = IND.cmf(r.s.dates, r.s.closes, r.s.volumes, 21);
+      var status = IND.moneyFlowStatus(cmf, 21);
+      (bySector[sector] = bySector[sector] || []).push({ ticker:r.t, cap:f.marketCap||0, flow:status });
+    });
+    var sectors = Object.keys(bySector);
+    var W = 960, H = Math.max(420, sectors.length*150), cxHub = W/2, cyHub = H/2;
+    var svg = "<svg viewBox='0 0 " + W + " " + H + "' width='100%' style='max-height:" + H + "px'>";
+    var hubR = 34;
+    // sector hubs around center
+    var secPos = {};
+    sectors.forEach(function(sec, i){
+      var ang = (i/sectors.length)*Math.PI*2 - Math.PI/2;
+      var r = Math.min(W,H)*0.30;
+      var x = cxHub + Math.cos(ang)*r, y = cyHub + Math.sin(ang)*r;
+      secPos[sec] = {x:x, y:y, ang:ang};
+      svg += "<line x1='" + cxHub + "' y1='" + cyHub + "' x2='" + x + "' y2='" + y + "' stroke='#26324a' stroke-width='1.5'/>";
+    });
+    // company nodes around each sector hub
+    sectors.forEach(function(sec){
+      var hub = secPos[sec];
+      var items = bySector[sec];
+      var maxCap = Math.max.apply(null, items.map(function(it){ return it.cap||0; }).concat([1]));
+      items.forEach(function(it, j){
+        var a = hub.ang + (j - (items.length-1)/2) * 0.5;
+        var rr = 88 + (items.length>6? (j%2)*34 : 0);
+        var x = hub.x + Math.cos(a)*rr, y = hub.y + Math.sin(a)*rr;
+        var rad = 10 + Math.sqrt((it.cap||0)/maxCap)*20;
+        var col = it.flow.cls==="up" ? "#3ecf8e" : (it.flow.cls==="down" ? "#f56565" : "#93a2bb");
+        svg += "<line x1='" + hub.x + "' y1='" + hub.y + "' x2='" + x + "' y2='" + y + "' stroke='" + col + "' stroke-opacity='.35' stroke-width='1.5'/>";
+        svg += "<g class='kg-cnode' data-kg-node='" + esc(it.ticker) + "' style='cursor:pointer'>" +
+          "<circle cx='" + x + "' cy='" + y + "' r='" + rad.toFixed(1) + "' fill='" + col + "' fill-opacity='.22' stroke='" + col + "' stroke-width='1.5'/>" +
+          "<text x='" + x + "' y='" + (y+4) + "' text-anchor='middle' fill='#e7edf7' font-size='11' font-weight='700'>" + esc(it.ticker) + "</text></g>";
+      });
+    });
+    // sector hubs on top
+    sectors.forEach(function(sec){
+      var hub = secPos[sec];
+      svg += "<g><circle cx='" + hub.x + "' cy='" + hub.y + "' r='" + hubR + "' fill='var(--panel2)' stroke='#4fd1c5' stroke-width='1.5'/>" +
+        "<text x='" + hub.x + "' y='" + (hub.y+4) + "' text-anchor='middle' fill='#4fd1c5' font-size='10.5' font-weight='700'>" + esc(sec.length>12?sec.slice(0,11)+"…":sec) + "</text></g>";
+    });
+    // center hub
+    svg += "<circle cx='" + cxHub + "' cy='" + cyHub + "' r='30' fill='#4fd1c5' fill-opacity='.15' stroke='#4fd1c5'/>" +
+      "<text x='" + cxHub + "' y='" + (cyHub+4) + "' text-anchor='middle' fill='#e7edf7' font-size='11' font-weight='800'>" + esc(src.label.split(":")[0]) + "</text>";
+    svg += "</svg>";
+    root.innerHTML =
+      "<div style='overflow-x:auto'>" + svg + "</div>" +
+      "<p class='footer-note'>Companies clustered by sector. Node size = market cap; " +
+      "<span style='color:#3ecf8e'>green</span> = money accumulating (positive Chaikin Money Flow), " +
+      "<span style='color:#f56565'>red</span> = distributing, grey = neutral. Click a node to open it.</p>";
+    $all("[data-kg-node]", root).forEach(function(el){ el.addEventListener("click", function(){ CO_TICKER = el.getAttribute("data-kg-node"); lsSet("companiesTicker", CO_TICKER); showTab("companies"); }); });
+  }).catch(function(e){ console.error("GMR: basket network failed", e); root.innerHTML = "<p class='muted small'>Could not build the network.</p>"; });
 }
 
 try{ init(); }

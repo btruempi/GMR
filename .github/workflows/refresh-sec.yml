@@ -1,0 +1,38 @@
+name: Refresh SEC money-flow data
+
+# Company financials change quarterly, so a weekly refresh is plenty. Keeps
+# data/sec/*.json current for the Money Flow knowledge graph. No secrets.
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"   # Mondays 09:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-sec
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch SEC financials
+        run: python3 scripts/fetch_sec.py
+      - name: Commit refreshed SEC data
+        run: |
+          if ! git diff --quiet -- data/sec; then
+            git config user.name "gmr-bot"
+            git config user.email "gmr-bot@users.noreply.github.com"
+            git add data/sec
+            git commit -m "Refresh SEC money-flow data [skip ci]"
+            git push
+          else
+            echo "No SEC data changes to commit."
+          fi
