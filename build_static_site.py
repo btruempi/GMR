@@ -551,33 +551,40 @@ JS_PROXY = r"""
 // ---- CORS proxy chain ----------------------------------------------------
 // Order matters: cheap/fast proxies first. Health state persists in
 // localStorage so a bad proxy this session stays deprioritized next time.
-// Verified against Yahoo from a GitHub Pages origin (2026-07). The free proxy
-// landscape churns constantly -- corsproxy.io (403), thingproxy (dead), and
-// r.jina.ai (401) all stopped working, so the chain leads with the ones that
-// still return a valid Access-Control-Allow-Origin today and keeps a couple of
-// backups. allorigins is the backbone but throws Cloudflare 5xx under load, so
-// we retry the whole chain once before giving up.
+// IMPORTANT: these are ranked by what works IN A BROWSER from a GitHub Pages
+// origin -- which is the opposite of what curl/server tests show. corsproxy.io
+// 403s to curl (no Origin) but works great from a real browser and is the most
+// reliable here, so it leads. allorigins is slow/flaky browser-side. Bump
+// PROXY_VERSION whenever this list changes to wipe stale per-user health data
+// that might otherwise wrongly deprioritize a now-working proxy.
+var PROXY_VERSION = 3;
 var PROXIES = [
+  {name:"corsproxy",      build:function(u){ return "https://corsproxy.io/?url=" + encodeURIComponent(u); }},
   {name:"allorigins-get", build:function(u){ return "https://api.allorigins.win/get?url=" + encodeURIComponent(u); }, wrapped:true},
-  {name:"corssh",         build:function(u){ return "https://proxy.cors.sh/" + u; }},
   {name:"allorigins-raw", build:function(u){ return "https://api.allorigins.win/raw?url=" + encodeURIComponent(u); }},
   {name:"codetabs",       build:function(u){ return "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u); }},
-  {name:"corslol",        build:function(u){ return "https://api.cors.lol/?url=" + encodeURIComponent(u); }},
-  {name:"thingproxy",     build:function(u){ return "https://thingproxy.freeboard.io/fetch/" + u; }}
+  {name:"corslol",        build:function(u){ return "https://api.cors.lol/?url=" + encodeURIComponent(u); }}
 ];
+(function resetProxyHealthIfStale(){
+  if (lsGet("proxyVersion", 0) !== PROXY_VERSION){
+    lsSet("proxyHealth", {}); lsSet("lastGoodProxy", null); lsSet("proxyVersion", PROXY_VERSION);
+  }
+})();
 function proxyHealth(){ return lsGet("proxyHealth", {}); }
 function saveProxyHealth(h){ lsSet("proxyHealth", h); }
 function orderedProxies(){
   var health = proxyHealth();
   var lastGood = lsGet("lastGoodProxy", null);
   var list = PROXIES.slice();
+  // sort by fewest fails, preferring the last-known-good route -- but never
+  // permanently exclude anyone (a proxy that works resets its count on success).
   list.sort(function(a,b){
     if (a.name === lastGood) return -1;
     if (b.name === lastGood) return 1;
     var fa = (health[a.name]||{}).fails||0, fb = (health[b.name]||{}).fails||0;
     return fa - fb;
   });
-  return list.filter(function(p){ return (health[p.name]||{}).fails < 5; });
+  return list;
 }
 function markProxyResult(name, ok){
   var health = proxyHealth();
@@ -828,15 +835,20 @@ function localSearch(q){
 }
 // Live search via Yahoo's public search endpoint (no auth), through the CORS
 // proxy chain. Resolves ticker OR company name to matching symbols.
+var US_EXCH = {"NASDAQ":1,"NYSE":1,"NYSEArca":1,"NYSE American":1,"NYSE Arca":1,"NYSEAmerican":1,"NCM":1,"NMS":1,"NGM":1,"PCX":1,"BATS":1,"Cboe US":1,"OTC Markets":1,"OTC":1};
 function liveSearch(q){
-  var url = "https://query2.finance.yahoo.com/v1/finance/search?q=" + encodeURIComponent(q) + "&quotesCount=8&newsCount=0";
+  var url = "https://query2.finance.yahoo.com/v1/finance/search?q=" + encodeURIComponent(q) + "&quotesCount=12&newsCount=0";
   return fetchViaProxies(url, 6000).then(function(txt){
     var quotes = (JSON.parse(txt).quotes) || [];
-    return quotes.filter(function(x){
+    var items = quotes.filter(function(x){
       return x.symbol && (x.quoteType === "EQUITY" || x.quoteType === "ETF");
     }).map(function(x){
-      return { symbol: x.symbol, name: x.shortname || x.longname || "", exch: x.exchDisp || "" };
+      var usListed = US_EXCH[x.exchDisp] || x.symbol.indexOf(".") === -1;
+      return { symbol: x.symbol, name: x.shortname || x.longname || "", exch: x.exchDisp || "", us: usListed ? 1 : 0 };
     });
+    // US primary listings first (Yahoo returns lots of foreign cross-listings)
+    items.sort(function(a,b){ return b.us - a.us; });
+    return items.slice(0, 8);
   });
 }
 
@@ -1409,6 +1421,7 @@ function advLine(label, arr, color, opts){
 
 // renderAdvancedChart(root, ticker, fullSeries, stateKey)
 function renderAdvancedChart(root, ticker, fullSeries, stateKey){
+  if (!root) return; // container gone (user navigated away before data loaded)
   var state = lsGet(stateKey, {range:"1Y", type:"candles", overlays:{sma20:true, sma50:true, sma200:false, ema21:false, bb:false, vwap:false}, osc:"rsi"});
   state.overlays = state.overlays || {};
   var ctx = { root:root, ticker:ticker, series:fullSeries, state:state, stateKey:stateKey, charts:{}, zoom:null };
@@ -1822,7 +1835,13 @@ function renderCompanyDetail(){
       "</div>";
 
     var overview = "";
-    if (f.summary || f.sector || f.industry){
+    if (!(f.summary || f.sector || f.industry)){
+      // non-baked ticker: real price/chart, but fundamentals need the baked set
+      overview =
+        "<p class='footer-note' style='margin-top:10px'>Price, chart, and technicals above are live. Full fundamentals " +
+        "(market cap, P/E, EPS, company profile) are baked for tracked tickers &mdash; add <b>" + esc(CO_TICKER) + "</b> to a " +
+        "watchlist and Arm alerts, and it&#39;ll be included in the next data refresh.</p>";
+    } else {
       overview =
         "<div class='section-title'>" + esc(name) + " Overview</div>" +
         "<div class='overview'>" +
@@ -1865,15 +1884,18 @@ function renderCompanyDetail(){
         "</div>" +
       "</div>";
 
-    renderAdvancedChart($("#co-adv-chart"), CO_TICKER, s, "advChart_companies");
+    // scope queries to the captured root so a mid-load tab switch (root
+    // detached) resolves them on the detached subtree instead of returning null
+    renderAdvancedChart($("#co-adv-chart", root), CO_TICKER, s, "advChart_companies");
 
-    $("#co-add-to-list").addEventListener("click", function(){
+    var addBtn = $("#co-add-to-list", root);
+    if (addBtn) addBtn.addEventListener("click", function(){
       var key = STATE.watchlists.active || Object.keys(STATE.watchlists.lists)[0];
       if (!key) { alert("Create a watchlist first on the Watchlists tab."); return; }
       var list = STATE.watchlists.lists[key];
       if (list.tickers.indexOf(CO_TICKER) === -1) list.tickers.push(CO_TICKER);
       saveWatchlists();
-      $("#co-add-to-list").textContent = "Added to " + (list.label||key);
+      addBtn.textContent = "Added to " + (list.label||key);
     });
   }).catch(function(e){
     console.error("GMR: company detail failed", e);
