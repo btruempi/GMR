@@ -36,6 +36,7 @@ def build_seed_data():
         "alerts": load_json("alerts.json"),
         "watchlists": load_json("watchlists.json"),
         "presets": load_json("presets.json"),
+        "relationships": load_json("relationships.json"),
     }
 
 
@@ -382,7 +383,8 @@ var STATE = {
   seriesCache: {},
   githubToken: lsGet("githubToken", ""),
   githubRepo: lsGet("githubRepo", ""),
-  deployFiles: window.GMR_DEPLOY_FILES || {}
+  deployFiles: window.GMR_DEPLOY_FILES || {},
+  relationships: SEED.relationships || {types:{}, edges:[]}
 };
 function saveWatchlists(){ lsSet("watchlists", STATE.watchlists); }
 function saveProfile(){ lsSet("profile", STATE.profile); }
@@ -3540,34 +3542,138 @@ RENDERERS.moneyflow = function(root){
   root.innerHTML =
     "<div class='card'>" +
       "<div class='flex-between'><div><h2>Money Flow &mdash; Financial Knowledge Graph</h2>" +
-        "<p class='muted small'>Traverse where money comes from and goes, from a single company up to a whole vertical or the entire tracked market. Built from companies&#39; latest annual <b>SEC filings</b> (SEC XBRL API). Aggregate view breaks spending down by sector; click through sector &rarr; company to drill in.</p></div></div>" +
+        "<p class='muted small'><b>Relationships</b>: a web of how companies connect &mdash; who supplies whom (vertical / supply-chain), who competes (horizontal), B2B customers, licensing, partnerships, and M&amp;A &mdash; click any node to traverse it. " +
+        "<b>Company spend</b> &amp; <b>Aggregate</b>: where money goes, from one SEC filing up to a whole vertical or the entire market.</p></div></div>" +
       "<div class='row'>" +
         "<div class='seg' id='kg-mode'>" +
-          "<button data-kg='company'" + (mode==="company"?" class='on'":"") + ">Company (micro)</button>" +
+          "<button data-kg='relationships'" + (mode==="relationships"?" class='on'":"") + ">Relationships</button>" +
+          "<button data-kg='company'" + (mode==="company"?" class='on'":"") + ">Company spend</button>" +
           "<button data-kg='aggregate'" + (mode==="aggregate"?" class='on'":"") + ">Aggregate (macro)</button>" +
-          "<button data-kg='basket'" + (mode==="basket"?" class='on'":"") + ">Network</button>" +
         "</div>" +
-        (mode==="company"
-          ? "<div><label>Ticker</label><input id='kg-ticker' type='text' value='" + esc(ticker) + "' style='width:120px;text-transform:uppercase'></div><div style='display:flex;align-items:flex-end'><button class='btn small' id='kg-load'>Show</button></div>"
-          : "<div><label>Scope</label><select id='kg-basket'>" + sources.map(function(s){ return "<option value='" + esc(s.id) + "'" + (s.id===basket?" selected":"") + ">" + esc(s.label) + "</option>"; }).join("") + "</select></div>") +
+        (mode==="aggregate"
+          ? "<div><label>Scope</label><select id='kg-basket'>" + sources.map(function(s){ return "<option value='" + esc(s.id) + "'" + (s.id===basket?" selected":"") + ">" + esc(s.label) + "</option>"; }).join("") + "</select></div>"
+          : "<div><label>Center company</label><input id='kg-ticker' type='text' value='" + esc(ticker) + "' style='width:130px;text-transform:uppercase'></div><div style='display:flex;align-items:flex-end'><button class='btn small' id='kg-load'>Show</button></div>") +
       "</div>" +
     "</div>" +
     "<div class='card' id='kg-canvas'><p class='muted small'>Loading...</p></div>";
 
   $all("#kg-mode button", root).forEach(function(b){ b.addEventListener("click", function(){ lsSet("kgMode", b.getAttribute("data-kg")); KG_AGG_SECTOR=null; showTab("moneyflow"); }); });
-  if (mode==="company"){
-    var load = function(){ var t=($("#kg-ticker").value||"").trim().toUpperCase(); if(t){ lsSet("kgTicker", t); renderCompanyFlow(t); } };
-    $("#kg-load").addEventListener("click", load);
-    $("#kg-ticker").addEventListener("keydown", function(e){ if(e.key==="Enter") load(); });
-    renderCompanyFlow(ticker);
-  } else if (mode==="aggregate"){
+  if (mode==="aggregate"){
     $("#kg-basket").addEventListener("change", function(e){ lsSet("kgBasket", e.target.value); KG_AGG_SECTOR=null; renderAggregateFlow(e.target.value); });
     renderAggregateFlow(basket);
   } else {
-    $("#kg-basket").addEventListener("change", function(e){ lsSet("kgBasket", e.target.value); renderBasketNetwork(e.target.value); });
-    renderBasketNetwork(basket);
+    var load = function(){ var t=($("#kg-ticker").value||"").trim().toUpperCase(); if(t){ lsSet("kgTicker", t); if(mode==="company") renderCompanyFlow(t); else renderRelationships(t); } };
+    $("#kg-load").addEventListener("click", load);
+    $("#kg-ticker").addEventListener("keydown", function(e){ if(e.key==="Enter") load(); });
+    if (mode==="company") renderCompanyFlow(ticker); else renderRelationships(ticker);
   }
 };
+
+// ---- Relationships ego-graph: who a company supplies, buys from, competes
+// with, licenses, partners, owns -- plus the edges among those neighbors, so
+// you see the local web and can traverse it by clicking any node.
+var KG_REL_FILTER = null; // set of enabled types, null = all
+function relEdges(){
+  var edges = (STATE.relationships.edges || []).slice();
+  // auto-derive competitor edges from shared sub-industry within the curated set
+  // (kept implicit to avoid clutter; curated competitor edges already exist).
+  return edges;
+}
+function renderRelationships(center){
+  center = (center||"").toUpperCase();
+  var root = $("#kg-canvas");
+  var types = STATE.relationships.types || {};
+  var allEdges = relEdges();
+  var enabled = KG_REL_FILTER || Object.keys(types);
+
+  // neighbors of center (any direction), then edges among {center}+neighbors
+  var neigh = {};
+  allEdges.forEach(function(e){
+    if (enabled.indexOf(e.type)===-1) return;
+    if (e.a===center) neigh[e.b]=1;
+    else if (e.b===center) neigh[e.a]=1;
+  });
+  var nodes = [center].concat(Object.keys(neigh));
+  var inSet = {}; nodes.forEach(function(n){ inSet[n]=1; });
+  var edges = allEdges.filter(function(e){ return enabled.indexOf(e.type)!==-1 && inSet[e.a] && inSet[e.b]; });
+
+  var legend = "<div class='row' id='kg-rel-filter' style='margin-bottom:6px'>" +
+    Object.keys(types).map(function(t){
+      var on = enabled.indexOf(t)!==-1;
+      return "<span class='chip" + (on?" active":"") + "' data-rel-type='" + esc(t) + "' title='" + esc(types[t].desc) + "'><span class='badge-dot' style='background:" + types[t].color + "'></span>" + esc(types[t].label) + "</span>";
+    }).join("") + "</div>";
+
+  if (Object.keys(neigh).length === 0){
+    root.innerHTML = legend + "<p class='muted small'>No curated relationships for <b>" + esc(center) + "</b> yet. Try a name with rich supply-chain ties like NVDA, TSM, CEG, LEU, MSFT, LLY, or TSLA. " +
+      "(This is a hand-curated map of the tracked universe -- suppliers, customers, competitors, licensing, partnerships, and M&A -- from public filings and reporting.)</p>";
+    bindRelFilter(root, center, enabled);
+    return;
+  }
+
+  // radial layout
+  var W = 960, H = Math.max(460, 120 + Object.keys(neigh).length*26), cx=W/2, cy=H/2;
+  var R = Math.min(W,H)*0.34;
+  var pos = {}; pos[center] = {x:cx, y:cy};
+  Object.keys(neigh).forEach(function(n, i){
+    var ang = (i/Object.keys(neigh).length)*Math.PI*2 - Math.PI/2;
+    pos[n] = {x: cx+Math.cos(ang)*R, y: cy+Math.sin(ang)*R};
+  });
+  var svg = "<svg viewBox='0 0 " + W + " " + H + "' width='100%' style='max-height:" + H + "px'>" +
+    "<defs><marker id='kgarrow' markerWidth='9' markerHeight='9' refX='7' refY='3' orient='auto'><path d='M0,0 L7,3 L0,6 Z' fill='#93a2bb'/></marker></defs>";
+  // edges
+  edges.forEach(function(e){
+    var p1=pos[e.a], p2=pos[e.b]; if(!p1||!p2) return;
+    var col = (types[e.type]||{}).color || "#93a2bb";
+    var directed = (types[e.type]||{}).directed;
+    // shorten to node edges so arrowheads sit outside the circles
+    var dx=p2.x-p1.x, dy=p2.y-p1.y, len=Math.sqrt(dx*dx+dy*dy)||1, ux=dx/len, uy=dy/len;
+    var x1=p1.x+ux*26, y1=p1.y+uy*26, x2=p2.x-ux*30, y2=p2.y-uy*30;
+    svg += "<line x1='" + x1.toFixed(1) + "' y1='" + y1.toFixed(1) + "' x2='" + x2.toFixed(1) + "' y2='" + y2.toFixed(1) + "' stroke='" + col + "' stroke-opacity='.55' stroke-width='2'" + (directed?" marker-end='url(#kgarrow)'":"") + "><title>" + esc(e.a + " -> " + e.b + ": " + ((types[e.type]||{}).label||e.type) + (e.note?(" (" + e.note + ")"):"")) + "</title></line>";
+  });
+  // nodes
+  nodes.forEach(function(n){
+    var p=pos[n]; var isC = n===center;
+    var rad = isC?34:24;
+    svg += "<g class='kg-rnode' data-rel-node='" + esc(n) + "' style='cursor:pointer'>" +
+      "<circle cx='" + p.x.toFixed(1) + "' cy='" + p.y.toFixed(1) + "' r='" + rad + "' fill='" + (isC?"rgba(79,209,197,.22)":"var(--panel2)") + "' stroke='" + (isC?"#4fd1c5":"#26324a") + "' stroke-width='" + (isC?2:1.5) + "'/>" +
+      "<text x='" + p.x.toFixed(1) + "' y='" + (p.y+4).toFixed(1) + "' text-anchor='middle' fill='#e7edf7' font-size='" + (isC?13:12) + "' font-weight='700'>" + esc(n) + "</text></g>";
+  });
+  svg += "</svg>";
+
+  // relationship list (the who/what)
+  var listRows = edges.map(function(e){
+    var t = types[e.type]||{};
+    var arrow = t.directed ? " &rarr; " : " &harr; ";
+    return "<tr><td><b>" + esc(e.a) + "</b>" + arrow + "<b>" + esc(e.b) + "</b></td>" +
+      "<td><span class='badge-dot' style='background:" + (t.color||"#93a2bb") + "'></span>" + esc(t.label||e.type) + "</td>" +
+      "<td class='muted'>" + esc(e.note||"") + "</td></tr>";
+  }).join("");
+
+  root.innerHTML = legend +
+    "<div class='flex-between'><h3 style='margin:2px 0'>" + esc(center) + " &mdash; relationship web (" + Object.keys(neigh).length + " connections)</h3>" +
+      "<button class='btn small ghost' id='kg-open-co'>Open " + esc(center) + " &rarr;</button></div>" +
+    "<p class='muted small' style='margin:0 0 6px'>Click any node to re-center the graph on it and traverse the web. Arrows point supplier&rarr;customer / acquirer&rarr;target / licensor&rarr;licensee.</p>" +
+    "<div style='overflow-x:auto'>" + svg + "</div>" +
+    "<table style='margin-top:10px'><thead><tr><th>Relationship</th><th>Type</th><th>Detail</th></tr></thead><tbody>" + listRows + "</tbody></table>" +
+    "<p class='footer-note'>Hand-curated from public filings, earnings materials, and widely reported news for the tracked universe -- illustrative, not exhaustive, not investment advice. " +
+      "Vertical (supply-chain) ties reveal integration/acquisition targets; horizontal ties reveal competitors and consolidation; customer/partner ties reveal B2B demand.</p>";
+
+  $all("[data-rel-node]", root).forEach(function(el){ el.addEventListener("click", function(){ var t=el.getAttribute("data-rel-node"); lsSet("kgTicker", t); renderRelationships(t); }); });
+  var ob = $("#kg-open-co"); if (ob) ob.addEventListener("click", function(){ CO_TICKER = center; lsSet("companiesTicker", center); showTab("companies"); });
+  bindRelFilter(root, center, enabled);
+}
+function bindRelFilter(root, center, enabled){
+  $all("[data-rel-type]", root).forEach(function(chip){
+    chip.addEventListener("click", function(){
+      var t = chip.dataset.relType;
+      var set = enabled.slice();
+      var i = set.indexOf(t);
+      if (i===-1) set.push(t); else set.splice(i,1);
+      KG_REL_FILTER = set.length ? set : Object.keys(STATE.relationships.types);
+      renderRelationships(center);
+    });
+  });
+}
 
 // Load SEC money-flow + sector for a set of tickers (skips those without data).
 function loadBasketSEC(tickers){
