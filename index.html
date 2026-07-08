@@ -155,6 +155,20 @@ tr.row-open td.caret{color:var(--accent)}
   border:1px solid var(--accent);color:var(--text);padding:10px 16px;border-radius:8px;font-size:13px;
   z-index:300;box-shadow:0 8px 30px rgba(0,0,0,.5);opacity:0;transition:opacity .2s}
 .wl-toast.show{opacity:1}
+.heat-sector{margin-bottom:16px}
+.heat-sector-head{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 6px;font-weight:700}
+.heat-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));grid-auto-rows:64px;gap:5px}
+.heat-tile{border-radius:7px;padding:7px 8px;display:flex;flex-direction:column;justify-content:center;
+  cursor:pointer;border:1px solid rgba(255,255,255,.06);overflow:hidden;transition:transform .08s}
+.heat-tile:hover{transform:scale(1.04);border-color:rgba(255,255,255,.25);z-index:2}
+.heat-tile .ht-sym{font-weight:800;font-size:14px;color:#fff}
+.heat-tile .ht-chg{font-size:12px;color:rgba(255,255,255,.9);font-weight:600}
+.heat-tile.md{grid-column:span 1;grid-row:span 1}
+.heat-tile.lg{grid-column:span 2;grid-row:span 1}
+.heat-tile.xl{grid-column:span 2;grid-row:span 2}
+.heat-tile.xl .ht-sym{font-size:18px}
+.heat-tile.sm .ht-sym{font-size:12.5px}
+@media(max-width:560px){ .heat-tile.xl,.heat-tile.lg{grid-column:span 2} }
 .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0 26px}
 @media(max-width:900px){ .stats-grid{grid-template-columns:repeat(2,1fr)} }
 @media(max-width:560px){ .stats-grid{grid-template-columns:1fr} }
@@ -277,7 +291,57 @@ function saveWatchlists(){ lsSet("watchlists", STATE.watchlists); }
 function saveProfile(){ lsSet("profile", STATE.profile); }
 function saveAlerts(){ lsSet("alerts", STATE.alerts); }
 function saveEmailSettings(){ lsSet("emailSettings", STATE.emailSettings); }
-function saveConstituents(){ lsSet("constituents", STATE.constituents); }
+
+// ---- indexes: named weighted baskets you can track like the nuclear one ---
+// STATE.constituents always points at the ACTIVE index's constituent array, so
+// every existing consumer (dashboard chart/KPIs, methodology, backtest) follows
+// whichever index is selected without further changes.
+STATE.indexes = lsGet("indexes", null);
+if (!STATE.indexes){
+  STATE.indexes = { nuclear: { label:"Nuclear", benchmarks:["URA","NLR"], constituents: STATE.constituents } };
+}
+STATE.activeIndex = lsGet("activeIndex", "nuclear");
+if (!STATE.indexes[STATE.activeIndex]) STATE.activeIndex = Object.keys(STATE.indexes)[0] || "nuclear";
+STATE.constituents = (STATE.indexes[STATE.activeIndex] || {}).constituents || STATE.constituents;
+
+function saveIndexes(){ lsSet("indexes", STATE.indexes); lsSet("activeIndex", STATE.activeIndex); }
+function saveConstituents(){ // active index edited in place -> persist indexes
+  if (STATE.indexes[STATE.activeIndex]) STATE.indexes[STATE.activeIndex].constituents = STATE.constituents;
+  saveIndexes();
+}
+function getActiveIndex(){ return STATE.indexes[STATE.activeIndex] || {label:"Index", benchmarks:[], constituents:STATE.constituents}; }
+function setActiveIndex(key){
+  if (!STATE.indexes[key]) return;
+  STATE.activeIndex = key;
+  STATE.constituents = STATE.indexes[key].constituents;
+  saveIndexes();
+}
+function createIndexFromWeights(name, tickers, weightMap){
+  var key = "idx-" + (name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"") || uid());
+  var cons = tickers.map(function(t){
+    return { ticker:t, name:t, sector:"Uncategorized", tier: (weightMap[t]>=8?1:2), weight: weightMap[t]!=null?weightMap[t]:(100/tickers.length) };
+  });
+  STATE.indexes[key] = { label:name, benchmarks:["SPY","QQQ"], constituents:cons };
+  saveIndexes();
+  return key;
+}
+function createIndexFromTickers(name, tickers, method, capByTicker){
+  var weightMap = {};
+  if (method === "market-cap" && capByTicker){
+    var total = tickers.reduce(function(a,t){ return a + (capByTicker[t]||0); }, 0);
+    tickers.forEach(function(t){ weightMap[t] = total>0 ? Math.round((capByTicker[t]||0)/total*1000)/10 : 100/tickers.length; });
+  } else {
+    var w = Math.round(1000/tickers.length)/10;
+    tickers.forEach(function(t){ weightMap[t] = w; });
+  }
+  return createIndexFromWeights(name, tickers, weightMap);
+}
+function deleteIndex(key){
+  if (key === "nuclear"){ alert("The featured Nuclear index cannot be deleted."); return; }
+  delete STATE.indexes[key];
+  if (STATE.activeIndex === key) setActiveIndex(Object.keys(STATE.indexes)[0]);
+  else saveIndexes();
+}
 
 // ---- indicator math (mirrors scripts/indicators.py -- keep in sync) -----
 var IND = {};
@@ -681,7 +745,9 @@ function getSeries(ticker, range){
 // ---- tabs / router ---------------------------------------------------
 var TABS = [
   {key:"dashboard",   label:"Dashboard"},
+  {key:"heatmap",     label:"Heatmap"},
   {key:"watchlists",  label:"Watchlists"},
+  {key:"indexes",     label:"Indexes"},
   {key:"companies",   label:"Companies"},
   {key:"optimizer",   label:"Optimizer"},
   {key:"backtest",    label:"Backtest"},
@@ -885,7 +951,9 @@ RENDERERS.dashboard = function(root){
       "<div class='card kpi'><h3>Top Mover Today</h3><div class='kpi-val' id='kpi-topmover'>--</div><div class='kpi-sub muted' id='kpi-topmover-sub'>&nbsp;</div></div>" +
     "</div>" +
     "<div class='grid cols-2'>" +
-      "<div class='card'><h3>Featured Index -- Nuclear</h3><div class='chart-wrap'><canvas id='dash-index-chart'></canvas></div></div>" +
+      "<div class='card'><div class='flex-between'><h3 style='margin:0'>Featured Index</h3>" +
+        "<select id='dash-index-select' style='width:auto'>" + Object.keys(STATE.indexes).map(function(k){ return "<option value='" + esc(k) + "'" + (k===STATE.activeIndex?" selected":"") + ">" + esc(STATE.indexes[k].label||k) + "</option>"; }).join("") + "</select></div>" +
+        "<div class='chart-wrap' style='margin-top:10px'><canvas id='dash-index-chart'></canvas></div></div>" +
       "<div class='card'><h3>Sector Weights</h3><div class='chart-wrap'><canvas id='dash-sector-donut'></canvas></div></div>" +
     "</div>" +
     "<div class='grid cols-2'>" +
@@ -900,6 +968,7 @@ RENDERERS.dashboard = function(root){
   $("#cta-watchlists").addEventListener("click", function(){ showTab("watchlists"); });
   $("#cta-alerts").addEventListener("click", function(){ showTab("alerts"); });
   $("#cta-optimizer").addEventListener("click", function(){ showTab("optimizer"); });
+  $("#dash-index-select").addEventListener("change", function(e){ setActiveIndex(e.target.value); showTab("dashboard"); });
 
   renderWatchlistSummary($("#dash-watchlist-summary"));
   renderSectorDonut($("#dash-sector-donut"));
@@ -1018,7 +1087,7 @@ function renderIndexChart(canvas){
     });
     new Chart(canvas.getContext("2d"), {
       type: "line",
-      data: { labels: baseDates, datasets: [{ label:"GMR Nuclear Index", data: composite, borderColor:"#4fd1c5", backgroundColor:"rgba(79,209,197,.12)", fill:true, pointRadius:0, tension:.15 }] },
+      data: { labels: baseDates, datasets: [{ label:"GMR " + (getActiveIndex().label||"") + " Index", data: composite, borderColor:"#4fd1c5", backgroundColor:"rgba(79,209,197,.12)", fill:true, pointRadius:0, tension:.15 }] },
       options: { maintainAspectRatio:false, scales:{ x:{ ticks:{ color:"#93a2bb", maxTicksLimit:8 }, grid:{color:"#1b2536"} }, y:{ ticks:{color:"#93a2bb"}, grid:{color:"#1b2536"} } }, plugins:{ legend:{ labels:{ color:"#93a2bb" } } } }
     });
   }).catch(function(e){ console.error("GMR: index chart failed", e); canvas.parentElement.innerHTML = "<p class='muted'>Chart unavailable right now.</p>"; });
@@ -2117,19 +2186,74 @@ function renderWeightsTable(p){
   var root = $("#opt-weights-card");
   var tickers = OPT_SAMPLES.tickers;
   var rows = tickers.map(function(t,i){ return {ticker:t, weight:p.weights[i]}; }).sort(function(a,b){ return b.weight-a.weight; });
-  var html = "<h3>Weights for Selected Mix</h3>" +
-    "<div class='grid cols-3' style='margin-bottom:14px'>" +
+  var html = "<div class='flex-between'><h3 style='margin:0'>Weights for Selected Mix</h3>" +
+      "<div class='row'><button class='btn small ghost' id='opt-save-index'>Save as index</button>" +
+      "<button class='btn small' id='opt-save-wl'>Save as watchlist &#9662;</button></div></div>" +
+    "<div class='grid cols-3' style='margin:12px 0 14px'>" +
       "<div class='card'><h3>Expected Return</h3><div class='" + pctClass(p.ret*100) + "'>" + fmtPct(p.ret*100) + "</div></div>" +
       "<div class='card'><h3>Volatility</h3><div>" + fmtNum(p.vol*100,1) + "%</div></div>" +
       "<div class='card'><h3>Sharpe</h3><div>" + fmtNum(p.sharpe,2) + "</div></div>" +
     "</div>" +
-    "<table><thead><tr><th>Ticker</th><th>Weight</th></tr></thead><tbody>";
+    "<table><thead><tr><th>Ticker</th><th>Weight</th><th></th></tr></thead><tbody>";
   rows.forEach(function(r){
     if (r.weight < 0.001) return;
-    html += "<tr><td>" + esc(r.ticker) + "</td><td>" + fmtNum(r.weight*100,1) + "%</td></tr>";
+    html += "<tr class='clickable' data-opt-ticker='" + esc(r.ticker) + "'><td>" + esc(r.ticker) + "</td><td>" + fmtNum(r.weight*100,1) + "%</td>" +
+      "<td><button class='btn small ghost' data-opt-add='" + esc(r.ticker) + "'>+ Watchlist</button></td></tr>";
   });
   html += "</tbody></table>";
   root.innerHTML = html;
+
+  // per-ticker: open Companies on row click, add via picker on the button
+  $all("[data-opt-ticker]", root).forEach(function(tr){
+    tr.addEventListener("click", function(){ CO_TICKER = tr.dataset.optTicker; lsSet("companiesTicker", CO_TICKER); showTab("companies"); });
+  });
+  $all("[data-opt-add]", root).forEach(function(b){
+    b.addEventListener("click", function(e){ e.stopPropagation(); openWatchlistMenu(b, b.dataset.optAdd, function(){ b.textContent = "Added"; }); });
+  });
+  // bulk: save the whole optimized set
+  var activeTickers = rows.filter(function(r){ return r.weight >= 0.001; }).map(function(r){ return r.ticker; });
+  var weightMap = {}; rows.forEach(function(r){ if (r.weight>=0.001) weightMap[r.ticker] = Math.round(r.weight*1000)/10; });
+  $("#opt-save-wl").addEventListener("click", function(e){
+    e.stopPropagation();
+    saveTickersAsWatchlist($("#opt-save-wl"), activeTickers);
+  });
+  $("#opt-save-index").addEventListener("click", function(){
+    var name = prompt("Name this index (optimized portfolio):", (OPT_UNIVERSE_KEY||"Optimized") + " Index");
+    if (!name) return;
+    createIndexFromWeights(name.trim(), activeTickers, weightMap);
+    toast("Created index <b>" + esc(name.trim()) + "</b> -- see the Indexes tab");
+  });
+}
+
+// Save a set of tickers into a chosen (or new) watchlist via the picker.
+function saveTickersAsWatchlist(anchor, tickers){
+  closeWatchlistMenu();
+  var menu = document.createElement("div");
+  menu.className = "wl-menu"; menu.id = "wl-menu";
+  var lists = STATE.watchlists.lists || {};
+  var rows = Object.keys(lists).map(function(k){
+    return "<div class='wm-item' data-bulk-wl='" + esc(k) + "'><span>" + esc(lists[k].label||k) + "</span><span class='wm-meta'>" + (lists[k].tickers||[]).length + " names</span></div>";
+  }).join("");
+  menu.innerHTML = "<div class='wm-head'>Save " + tickers.length + " names to</div>" + rows + "<div class='wm-item wm-new' data-bulk-new='1'>+ New watchlist</div>";
+  document.body.appendChild(menu);
+  var r = anchor.getBoundingClientRect();
+  menu.style.top = (r.bottom + window.scrollY + 4) + "px";
+  menu.style.left = Math.max(8, Math.min(r.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - (menu.offsetWidth||240) - 8)) + "px";
+  function into(key){
+    var list = STATE.watchlists.lists[key];
+    tickers.forEach(function(t){ if (list.tickers.indexOf(t)===-1) list.tickers.push(t); });
+    STATE.watchlists.active = key; saveWatchlists(); closeWatchlistMenu();
+    toast("Saved " + tickers.length + " names to <b>" + esc(list.label||key) + "</b>");
+  }
+  $all("[data-bulk-wl]", menu).forEach(function(el){ el.addEventListener("click", function(){ into(el.dataset.bulkWl); }); });
+  menu.querySelector("[data-bulk-new]").addEventListener("click", function(){
+    var name = prompt("Name for the new watchlist:"); if (!name) return; name = name.trim(); if (!name) return;
+    var key = name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"")||uid();
+    STATE.watchlists.lists[key] = {label:name, desc:"", tickers:[], indicators: Object.assign({}, DEFAULT_INDICATORS)};
+    into(key);
+  });
+  menu._outside = function(e){ if (!menu.contains(e.target) && e.target!==anchor && !anchor.contains(e.target)) closeWatchlistMenu(); };
+  setTimeout(function(){ document.addEventListener("mousedown", menu._outside); }, 0);
 }
 
 // ---- Backtest tab ---------------------------------------------------
@@ -2142,8 +2266,9 @@ var BT_CHARTS = {};
 RENDERERS.backtest = function(root){
   root.innerHTML =
     "<div class='card'>" +
-      "<h2>Backtest</h2>" +
-      "<p class='muted small'>Composite is the featured Nuclear index (weighted by constituent). Benchmarks: SPY (S&amp;P 500), URA (uranium miners ETF), NLR (uranium + nuclear energy ETF).</p>" +
+      "<div class='flex-between'><h2>Backtest</h2>" +
+        "<select id='bt-index-select' style='width:auto'>" + Object.keys(STATE.indexes).map(function(k){ return "<option value='" + esc(k) + "'" + (k===STATE.activeIndex?" selected":"") + ">" + esc(STATE.indexes[k].label||k) + " Index</option>"; }).join("") + "</select></div>" +
+      "<p class='muted small'>Composite is the <b>" + esc(getActiveIndex().label||"") + "</b> index (weighted by constituent), vs your selected benchmarks.</p>" +
       "<div class='row'><label style='margin:0'>Lookback:</label>" +
         Object.keys(LOOKBACK_YEARS).map(function(k){ return "<span class='chip" + (BT_LOOKBACK===k?" active":"") + "' data-lookback='" + k + "'>" + k + "</span>"; }).join("") +
       "</div>" +
@@ -2167,6 +2292,7 @@ RENDERERS.backtest = function(root){
   $all("[data-overlay]", root).forEach(function(b){
     b.addEventListener("click", function(){ BT_OVERLAYS[b.dataset.overlay] = !BT_OVERLAYS[b.dataset.overlay]; lsSet("btOverlays", BT_OVERLAYS); showTab("backtest"); });
   });
+  $("#bt-index-select").addEventListener("change", function(e){ setActiveIndex(e.target.value); showTab("backtest"); });
 
   runBacktest();
 };
@@ -2202,7 +2328,7 @@ function runBacktest(){
       return wsum ? sum/wsum : null;
     });
 
-    var datasets = [{ label:"GMR Nuclear Composite", data:composite, borderColor:"#4fd1c5", backgroundColor:"rgba(79,209,197,.1)", fill:true, pointRadius:0, borderWidth:2, tension:.1 }];
+    var datasets = [{ label:"GMR " + (getActiveIndex().label||"") + " Composite", data:composite, borderColor:"#4fd1c5", backgroundColor:"rgba(79,209,197,.1)", fill:true, pointRadius:0, borderWidth:2, tension:.1 }];
     var colors = {SPY:"#f6ad55", URA:"#5b8cff", NLR:"#a78bfa"};
     benchTickers.forEach(function(t){
       var s = benchSeries[t];
@@ -2964,6 +3090,207 @@ function renderEmailDigestCard(){
       status.textContent = "Push failed -- see console for details.";
     });
   });
+}
+
+// ---- Indexes tab: create + track weighted baskets for any vertical --------
+RENDERERS.indexes = function(root){
+  var keys = Object.keys(STATE.indexes);
+  root.innerHTML =
+    "<div class='card'>" +
+      "<div class='flex-between'><div><h2>Indexes</h2>" +
+        "<p class='muted small'>Build weighted baskets for any vertical market and track them like the featured Nuclear index -- composite chart, sector mix, and backtest.</p></div></div>" +
+      "<div class='section-title'>Create a new index</div>" +
+      "<div class='grid cols-4'>" +
+        "<div><label>Name</label><input id='idx-name' type='text' placeholder='e.g. My Semis Index'></div>" +
+        "<div><label>Source</label><select id='idx-source'>" +
+          "<optgroup label='Your watchlists'>" + Object.keys(STATE.watchlists.lists).map(function(k){ return "<option value='wl:" + esc(k) + "'>" + esc(STATE.watchlists.lists[k].label||k) + "</option>"; }).join("") + "</optgroup>" +
+          "<optgroup label='Sector presets'>" + STATE.presets.map(function(p){ return "<option value='ps:" + esc(p.key) + "'>" + esc(p.label) + "</option>"; }).join("") + "</optgroup>" +
+        "</select></div>" +
+        "<div><label>Weighting</label><select id='idx-method'><option value='market-cap'>Market cap</option><option value='equal'>Equal weight</option></select></div>" +
+        "<div style='display:flex;align-items:flex-end'><button class='btn' id='idx-create'>Create index</button></div>" +
+      "</div>" +
+    "</div>" +
+    "<div id='idx-list' class='grid cols-2'></div>";
+
+  $("#idx-create").addEventListener("click", createIndexFromForm);
+  renderIndexCards();
+};
+
+function createIndexFromForm(){
+  var name = ($("#idx-name").value||"").trim();
+  var source = $("#idx-source").value;
+  var method = $("#idx-method").value;
+  if (!name){ alert("Give the index a name."); return; }
+  if (!source){ alert("Pick a source watchlist or preset."); return; }
+  var tickers = [];
+  if (source.indexOf("wl:")===0){ var l = STATE.watchlists.lists[source.slice(3)]; tickers = l ? l.tickers.slice() : []; }
+  else if (source.indexOf("ps:")===0){ var p = STATE.presets.filter(function(x){return x.key===source.slice(3);})[0]; tickers = p ? p.tickers.slice() : []; }
+  if (tickers.length < 2){ alert("Need at least 2 tickers."); return; }
+
+  var btn = $("#idx-create"); btn.disabled = true; btn.textContent = "Building...";
+  // market-cap weighting needs baked fundamentals; fetch series (which carry
+  // fundamentals for baked tickers) then build.
+  Promise.all(tickers.map(function(t){ return getSeries(t).then(function(s){ return {t:t, cap:(s.fundamentals&&s.fundamentals.marketCap)||0}; }); })).then(function(rows){
+    var capBy = {}; rows.forEach(function(r){ capBy[r.t] = r.cap; });
+    if (method === "market-cap" && rows.every(function(r){ return !r.cap; })) method = "equal";
+    var key = createIndexFromTickers(name, tickers, method, capBy);
+    // enrich constituent names/sectors from fundamentals where available
+    Promise.all(tickers.map(function(t){ return getSeries(t); })).then(function(seriesList){
+      seriesList.forEach(function(s, i){
+        var f = s.fundamentals || {};
+        var c = STATE.indexes[key].constituents[i];
+        if (c){ if (f.name) c.name = f.name; if (f.sector) c.sector = f.sector; }
+      });
+      saveIndexes();
+      setActiveIndex(key);
+      toast("Created &amp; activated <b>" + esc(name) + "</b>");
+      showTab("indexes");
+    });
+  }).catch(function(e){ console.error("GMR: create index failed", e); btn.disabled=false; btn.textContent="Create index"; });
+}
+
+function renderIndexCards(){
+  var root = $("#idx-list");
+  var keys = Object.keys(STATE.indexes);
+  root.innerHTML = keys.map(function(k){
+    var idx = STATE.indexes[k];
+    var active = k === STATE.activeIndex;
+    return "<div class='card'>" +
+      "<div class='flex-between'><div><h3 style='margin:0;color:var(--text);text-transform:none;font-size:16px'>" + esc(idx.label||k) + (active?" <span class='pill up'>active</span>":"") + "</h3>" +
+        "<p class='muted small'>" + (idx.constituents||[]).length + " constituents</p></div></div>" +
+      "<div class='chart-wrap small'><canvas id='idxc-" + esc(k) + "'></canvas></div>" +
+      "<div class='cta-row'>" +
+        (active ? "" : "<button class='btn small' data-idx-activate='" + esc(k) + "'>Make active</button>") +
+        "<button class='btn small secondary' data-idx-backtest='" + esc(k) + "'>Backtest</button>" +
+        "<button class='btn small ghost' data-idx-heatmap='" + esc(k) + "'>Heatmap</button>" +
+        (k==="nuclear" ? "" : "<button class='btn small ghost' data-idx-delete='" + esc(k) + "'>Delete</button>") +
+      "</div></div>";
+  }).join("");
+
+  keys.forEach(function(k){ renderCompositeMini($("#idxc-" + k), STATE.indexes[k].constituents); });
+  $all("[data-idx-activate]", root).forEach(function(b){ b.addEventListener("click", function(){ setActiveIndex(b.dataset.idxActivate); toast("Active index: <b>" + esc(STATE.indexes[b.dataset.idxActivate].label) + "</b>"); showTab("indexes"); }); });
+  $all("[data-idx-backtest]", root).forEach(function(b){ b.addEventListener("click", function(){ setActiveIndex(b.dataset.idxBacktest); showTab("backtest"); }); });
+  $all("[data-idx-heatmap]", root).forEach(function(b){ b.addEventListener("click", function(){ lsSet("heatmapSource", "idx:" + b.dataset.idxHeatmap); showTab("heatmap"); }); });
+  $all("[data-idx-delete]", root).forEach(function(b){ b.addEventListener("click", function(){ if(confirm("Delete this index?")){ deleteIndex(b.dataset.idxDelete); showTab("indexes"); } }); });
+}
+
+function renderCompositeMini(canvas, cons){
+  if (!canvas || !cons || !cons.length) return;
+  var tickers = cons.map(function(c){ return c.ticker; });
+  Promise.all(tickers.map(function(t){ return getSeries(t); })).then(function(seriesList){
+    var baseDates = seriesList.reduce(function(a,s){ return s.dates.length>a.length?s.dates:a; }, []);
+    var totalW = cons.reduce(function(a,c){ return a+(c.weight||0); }, 0) || 1;
+    var composite = baseDates.map(function(d, i){
+      var sum=0, wsum=0;
+      seriesList.forEach(function(s, idx){
+        var off = baseDates.length - s.closes.length; var si = i - off;
+        if (si<0 || !s.closes[0]) return;
+        sum += (s.closes[si]/s.closes[0])*100 * (cons[idx].weight||0); wsum += (cons[idx].weight||0);
+      });
+      return wsum ? sum/wsum : null;
+    });
+    var last = composite.filter(function(v){return v!=null;});
+    var up = last.length>1 && last[last.length-1] >= last[0];
+    new Chart(canvas.getContext("2d"), {
+      type:"line", data:{ labels:baseDates, datasets:[{ data:composite, borderColor: up?"#3ecf8e":"#f56565", backgroundColor:"transparent", pointRadius:0, borderWidth:1.6, tension:.15 }] },
+      options:{ maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{enabled:false}}, scales:{ x:{display:false}, y:{ position:"right", ticks:{color:"#93a2bb", maxTicksLimit:3}, grid:{color:"#1b2536"} } } }
+    });
+  }).catch(function(e){ console.error("GMR: composite mini failed", e); });
+}
+
+// ---- Heatmap tab: Finviz-style tiles, filterable by any basket ------------
+var HM_PERIODS = [["1D",1],["1W",5],["1M",21],["3M",63],["YTD",-1],["1Y",252]];
+var HM_SIZE = [["cap","Size by market cap"],["equal","Equal size"]];
+
+function heatSources(){
+  var out = [];
+  Object.keys(STATE.indexes).forEach(function(k){ out.push({id:"idx:"+k, label:"Index: "+(STATE.indexes[k].label||k), tickers:(STATE.indexes[k].constituents||[]).map(function(c){return c.ticker;})}); });
+  Object.keys(STATE.watchlists.lists).forEach(function(k){ out.push({id:"wl:"+k, label:"Watchlist: "+(STATE.watchlists.lists[k].label||k), tickers:(STATE.watchlists.lists[k].tickers||[]).slice()}); });
+  STATE.presets.forEach(function(p){ out.push({id:"ps:"+p.key, label:"Vertical: "+p.label, tickers:p.tickers.slice()}); });
+  return out;
+}
+
+RENDERERS.heatmap = function(root){
+  var sources = heatSources();
+  var sel = lsGet("heatmapSource", "idx:" + STATE.activeIndex);
+  if (!sources.some(function(s){ return s.id===sel; })) sel = sources[0] ? sources[0].id : "";
+  var period = lsGet("heatmapPeriod", "1D");
+  var sizeMode = lsGet("heatmapSize", "cap");
+
+  root.innerHTML =
+    "<div class='card'>" +
+      "<div class='flex-between'><div><h2>Heatmap</h2>" +
+        "<p class='muted small'>Performance heatmap across any basket -- green up, red down, tiles sized by market cap and grouped by sector. Click a tile to open it.</p></div></div>" +
+      "<div class='row'>" +
+        "<div><label>Source</label><select id='hm-source'>" + sources.map(function(s){ return "<option value='" + esc(s.id) + "'" + (s.id===sel?" selected":"") + ">" + esc(s.label) + "</option>"; }).join("") + "</select></div>" +
+        "<div><label>Period</label><select id='hm-period'>" + HM_PERIODS.map(function(p){ return "<option value='" + p[0] + "'" + (p[0]===period?" selected":"") + ">" + p[0] + "</option>"; }).join("") + "</select></div>" +
+        "<div><label>Sizing</label><select id='hm-size'>" + HM_SIZE.map(function(m){ return "<option value='" + m[0] + "'" + (m[0]===sizeMode?" selected":"") + ">" + m[1] + "</option>"; }).join("") + "</select></div>" +
+      "</div>" +
+    "</div>" +
+    "<div id='hm-grid'><p class='muted small'>Loading heatmap...</p></div>";
+
+  $("#hm-source").addEventListener("change", function(e){ lsSet("heatmapSource", e.target.value); showTab("heatmap"); });
+  $("#hm-period").addEventListener("change", function(e){ lsSet("heatmapPeriod", e.target.value); showTab("heatmap"); });
+  $("#hm-size").addEventListener("change", function(e){ lsSet("heatmapSize", e.target.value); showTab("heatmap"); });
+
+  var src = sources.filter(function(s){ return s.id===sel; })[0];
+  if (!src || !src.tickers.length){ $("#hm-grid").innerHTML = "<div class='card'><p class='muted small'>This basket has no tickers.</p></div>"; return; }
+  renderHeatmapGrid(src.tickers, period, sizeMode);
+};
+
+function periodChange(s, period){
+  var closes = s.closes; if (!closes || closes.length<2) return 0;
+  var last = closes[closes.length-1];
+  if (period === "YTD"){
+    var yr = new Date().getFullYear();
+    var idx = s.dates.findIndex(function(d){ return d >= (yr + "-01-01"); });
+    if (idx > 0) return (last/closes[idx]-1)*100;
+    return (last/closes[0]-1)*100;
+  }
+  var n = 1; HM_PERIODS.forEach(function(p){ if(p[0]===period) n=p[1]; });
+  var ref = closes.length>n ? closes[closes.length-1-n] : closes[0];
+  return (last/ref-1)*100;
+}
+function heatBg(pct){
+  var m = Math.max(0, Math.min(1, Math.abs(pct)/6));
+  var a = 0.18 + m*0.72;
+  return pct>=0 ? "rgba(34,197,94," + a.toFixed(2) + ")" : "rgba(239,68,68," + a.toFixed(2) + ")";
+}
+function capBucket(cap){
+  if (cap >= 5e11) return "xl";
+  if (cap >= 1e11) return "lg";
+  if (cap >= 2e10) return "md";
+  return "sm";
+}
+
+function renderHeatmapGrid(tickers, period, sizeMode){
+  var root = $("#hm-grid");
+  Promise.all(tickers.map(function(t){ return getSeries(t).then(function(s){ return {t:t, s:s}; }); })).then(function(rows){
+    var bySector = {};
+    rows.forEach(function(r){
+      var f = r.s.fundamentals || {};
+      var sector = f.sector || "Other";
+      var cap = f.marketCap || 0;
+      var chg = periodChange(r.s, period);
+      (bySector[sector] = bySector[sector] || []).push({ ticker:r.t, chg:chg, cap:cap, name:f.name||r.t });
+    });
+    var sectors = Object.keys(bySector).sort(function(a,b){
+      var ca = bySector[a].reduce(function(x,y){return x+y.cap;},0), cb = bySector[b].reduce(function(x,y){return x+y.cap;},0);
+      return cb - ca;
+    });
+    var html = sectors.map(function(sec){
+      var items = bySector[sec].sort(function(a,b){ return b.cap - a.cap; });
+      var tiles = items.map(function(it){
+        var sizeCls = sizeMode==="cap" ? capBucket(it.cap) : "md";
+        return "<div class='heat-tile " + sizeCls + "' data-heat='" + esc(it.ticker) + "' style='background:" + heatBg(it.chg) + "' title='" + esc(it.name) + (it.cap?" -- " + fmtBig(it.cap):"") + "'>" +
+          "<div class='ht-sym'>" + esc(it.ticker) + "</div>" +
+          "<div class='ht-chg'>" + fmtPct(it.chg) + "</div></div>";
+      }).join("");
+      return "<div class='heat-sector'><div class='heat-sector-head'>" + esc(sec) + "</div><div class='heat-tiles'>" + tiles + "</div></div>";
+    }).join("");
+    root.innerHTML = html + "<p class='footer-note'>Change over " + esc(period) + ". Market-cap sizing uses baked fundamentals; tickers without them show a default size.</p>";
+    $all("[data-heat]", root).forEach(function(el){ el.addEventListener("click", function(){ CO_TICKER = el.dataset.heat; lsSet("companiesTicker", CO_TICKER); showTab("companies"); }); });
+  }).catch(function(e){ console.error("GMR: heatmap failed", e); root.innerHTML = "<div class='card'><p class='muted small'>Could not build the heatmap right now.</p></div>"; });
 }
 
 try{ init(); }

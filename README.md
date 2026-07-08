@@ -18,7 +18,9 @@ Python + GitHub Actions backend for scheduled alerts.
 
 | Tab | What it does |
 |-----|--------------|
-| **Dashboard** | Featured composite index chart, sector doughnut, quick actions. |
+| **Dashboard** | Live KPI command center, selectable featured index chart, sector doughnut, leaders/laggards. |
+| **Heatmap** | Finviz-style performance heatmap — tiles colored by % change (1D–1Y), sized by market cap, grouped by sector; filter by any watchlist, sector vertical, or custom index. |
+| **Indexes** | Build weighted baskets for any vertical (from a watchlist or preset, equal- or market-cap-weighted), track each as a composite you can activate across the Dashboard/Backtest/Heatmap. |
 | **Watchlists** | The main workflow. Named baskets, one-click clones of 30+ sector presets, per-list indicator toggles, a table with quotes + RSI + MFI + a money-flow status column. **Click any row** to open the same full Yahoo-style chart (candles, overlays, volume, oscillator, drag-to-zoom) plus an analytics header. |
 | **Companies** | Look up any US-listed ticker (header search box, autocomplete) with a full Yahoo-style chart: candlestick / line / area, range selector (1M–Max), SMA/EMA/Bollinger/VWAP overlays, a volume panel, an RSI/MACD/MFI/CMF oscillator pane, a synced crosshair with OHLCV readout, **two-finger-scroll zoom**, and **drag-to-pan**. Plus a Yahoo-style statistics grid (Market Cap, PE, EPS, Beta, dividend, 52W range, 1y target, earnings date…), a company overview (description, sector, industry, employees), technicals, and a compare card. |
 | **Optimizer** | Max-Sharpe / min-vol / equal-weight / inverse-vol portfolios at 15/20/25% position caps, with a **clickable** efficient frontier. |
