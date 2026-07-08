@@ -176,6 +176,9 @@ tr.row-open td.caret{color:var(--accent)}
 .archived-block{margin-top:8px;width:100%}
 .archived-block summary{cursor:pointer;color:var(--muted);font-size:12.5px;padding:4px 0}
 .archived-block summary:hover{color:var(--text)}
+.kg-crumb{font-size:13px;color:var(--muted);margin-bottom:4px}
+.kg-crumb .link{color:var(--accent);cursor:pointer}
+.kg-crumb .link:hover{text-decoration:underline}
 .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0 26px}
 @media(max-width:900px){ .stats-grid{grid-template-columns:repeat(2,1fr)} }
 @media(max-width:560px){ .stats-grid{grid-template-columns:1fr} }
@@ -938,6 +941,8 @@ function init(){
   wireTopSearch();
   updateMarketStatus();
   setInterval(updateMarketStatus, 60000);
+  // load the SEC-filer index so Money Flow can offer the whole-market scope
+  fetch("data/sec/_index.json", {cache:"default"}).then(function(r){ return r.ok?r.json():null; }).then(function(j){ if(j) window.GMR_SEC_INDEX = j; }).catch(function(){});
   var initial = (location.hash||"").replace("#","");
   var valid = TABS.some(function(t){ return t.key===initial; });
   showTab(valid ? initial : "dashboard");
@@ -2999,18 +3004,21 @@ function diagnoseSetup(){
 }
 
 // ---- Methodology tab ----------------------------------------------------
-var METH_MODE = "featured";
+var METH_MODE = null;
 var CADENCE_OPTIONS = ["daily","weekly","monthly","quarterly","yearly","off"];
 
 RENDERERS.methodology = function(root){
-  var wlKeys = Object.keys(STATE.watchlists.lists);
+  var wlKeys = activeWatchlistKeys();
+  if (!METH_MODE) METH_MODE = "idx:" + STATE.activeIndex;
   root.innerHTML =
     "<div class='card'>" +
       "<h2>Methodology</h2>" +
       "<label>Show methodology for</label>" +
       "<select id='meth-select'>" +
-        "<option value='featured'" + (METH_MODE==="featured"?" selected":"") + ">Featured index</option>" +
-        wlKeys.map(function(k){ return "<option value='wl:" + esc(k) + "'" + (METH_MODE==="wl:"+k?" selected":"") + ">Watchlist: " + esc(STATE.watchlists.lists[k].label||k) + "</option>"; }).join("") +
+        "<optgroup label='Indexes'>" +
+          activeIndexKeys().map(function(k){ return "<option value='idx:" + esc(k) + "'" + (METH_MODE==="idx:"+k?" selected":"") + ">" + esc(STATE.indexes[k].label||k) + " Index</option>"; }).join("") +
+        "</optgroup>" +
+        (wlKeys.length ? "<optgroup label='Watchlists'>" + wlKeys.map(function(k){ return "<option value='wl:" + esc(k) + "'" + (METH_MODE==="wl:"+k?" selected":"") + ">Watchlist: " + esc(STATE.watchlists.lists[k].label||k) + "</option>"; }).join("") + "</optgroup>" : "") +
       "</select>" +
     "</div>" +
     "<div id='meth-body'></div>";
@@ -3021,7 +3029,12 @@ RENDERERS.methodology = function(root){
 
 function renderMethodologyBody(){
   var root = $("#meth-body");
-  if (METH_MODE === "featured"){ renderFeaturedMethodology(root); return; }
+  if (METH_MODE.indexOf("idx:") === 0){
+    var ikey = METH_MODE.slice(4);
+    if (STATE.indexes[ikey] && STATE.activeIndex !== ikey) setActiveIndex(ikey); // edits apply to the selected index
+    renderFeaturedMethodology(root);
+    return;
+  }
   var key = METH_MODE.replace("wl:", "");
   var list = STATE.watchlists.lists[key];
   if (!list){ root.innerHTML = "<div class='card'><p class='muted small'>List not found.</p></div>"; return; }
@@ -3050,8 +3063,8 @@ function renderFeaturedMethodology(root){
 
   root.innerHTML =
     "<div class='card'>" +
-      "<h3>Tiered Weights</h3>" +
-      "<p class='muted small'>Total allocated weight: " + fmtNum(totalWeight,1) + "% (should sum to 100%). Tier 1 names are core holdings; Tier 2 are satellite/emerging exposure.</p>" +
+      "<h3>" + esc(getActiveIndex().label||"Index") + " &mdash; Tiered Weights</h3>" +
+      "<p class='muted small'>Total allocated weight: " + fmtNum(totalWeight,1) + "% (should sum to 100%). Tier 1 names are core holdings; Tier 2 are satellite/emerging exposure. Edits here update this index everywhere.</p>" +
       tierTable(tier1, "Tier 1 -- Core") +
       tierTable(tier2, "Tier 2 -- Satellite") +
       "<div class='section-title'>Add Constituent</div>" +
@@ -3376,37 +3389,141 @@ var KG_OUT_META = [
   ["buybacks","Buybacks","#a78bfa"]
 ];
 
+var KG_AGG_SECTOR = null; // drill-down sector filter for the aggregate view
+function kgSources(){
+  var out = heatSources();
+  // macro option: the entire tracked market (all baked SEC filers)
+  var allSec = (window.GMR_SEC_INDEX && window.GMR_SEC_INDEX.tickers) || [];
+  out.unshift({ id:"all:market", label:"Entire tracked market", tickers: allSec });
+  return out;
+}
+
 RENDERERS.moneyflow = function(root){
   var mode = lsGet("kgMode", "company");
   var ticker = lsGet("kgTicker", CO_TICKER || "NVDA");
-  var sources = heatSources();
+  var sources = kgSources();
   var basket = lsGet("kgBasket", "idx:" + STATE.activeIndex);
   if (!sources.some(function(s){ return s.id===basket; })) basket = sources[0] ? sources[0].id : "";
 
   root.innerHTML =
     "<div class='card'>" +
       "<div class='flex-between'><div><h2>Money Flow &mdash; Financial Knowledge Graph</h2>" +
-        "<p class='muted small'>A node-and-edge view of where a company&#39;s money comes from and where it goes, built from its latest annual <b>SEC filing</b> (10-K/20-F/40-F via the SEC XBRL API). Or switch to the basket view to see where market money is flowing across a group.</p></div></div>" +
+        "<p class='muted small'>Traverse where money comes from and goes, from a single company up to a whole vertical or the entire tracked market. Built from companies&#39; latest annual <b>SEC filings</b> (SEC XBRL API). Aggregate view breaks spending down by sector; click through sector &rarr; company to drill in.</p></div></div>" +
       "<div class='row'>" +
-        "<div class='seg' id='kg-mode'><button data-kg='company'" + (mode==="company"?" class='on'":"") + ">Company flow</button><button data-kg='basket'" + (mode==="basket"?" class='on'":"") + ">Basket network</button></div>" +
+        "<div class='seg' id='kg-mode'>" +
+          "<button data-kg='company'" + (mode==="company"?" class='on'":"") + ">Company (micro)</button>" +
+          "<button data-kg='aggregate'" + (mode==="aggregate"?" class='on'":"") + ">Aggregate (macro)</button>" +
+          "<button data-kg='basket'" + (mode==="basket"?" class='on'":"") + ">Network</button>" +
+        "</div>" +
         (mode==="company"
           ? "<div><label>Ticker</label><input id='kg-ticker' type='text' value='" + esc(ticker) + "' style='width:120px;text-transform:uppercase'></div><div style='display:flex;align-items:flex-end'><button class='btn small' id='kg-load'>Show</button></div>"
-          : "<div><label>Basket</label><select id='kg-basket'>" + sources.map(function(s){ return "<option value='" + esc(s.id) + "'" + (s.id===basket?" selected":"") + ">" + esc(s.label) + "</option>"; }).join("") + "</select></div>") +
+          : "<div><label>Scope</label><select id='kg-basket'>" + sources.map(function(s){ return "<option value='" + esc(s.id) + "'" + (s.id===basket?" selected":"") + ">" + esc(s.label) + "</option>"; }).join("") + "</select></div>") +
       "</div>" +
     "</div>" +
     "<div class='card' id='kg-canvas'><p class='muted small'>Loading...</p></div>";
 
-  $all("#kg-mode button", root).forEach(function(b){ b.addEventListener("click", function(){ lsSet("kgMode", b.getAttribute("data-kg")); showTab("moneyflow"); }); });
+  $all("#kg-mode button", root).forEach(function(b){ b.addEventListener("click", function(){ lsSet("kgMode", b.getAttribute("data-kg")); KG_AGG_SECTOR=null; showTab("moneyflow"); }); });
   if (mode==="company"){
     var load = function(){ var t=($("#kg-ticker").value||"").trim().toUpperCase(); if(t){ lsSet("kgTicker", t); renderCompanyFlow(t); } };
     $("#kg-load").addEventListener("click", load);
     $("#kg-ticker").addEventListener("keydown", function(e){ if(e.key==="Enter") load(); });
     renderCompanyFlow(ticker);
+  } else if (mode==="aggregate"){
+    $("#kg-basket").addEventListener("change", function(e){ lsSet("kgBasket", e.target.value); KG_AGG_SECTOR=null; renderAggregateFlow(e.target.value); });
+    renderAggregateFlow(basket);
   } else {
     $("#kg-basket").addEventListener("change", function(e){ lsSet("kgBasket", e.target.value); renderBasketNetwork(e.target.value); });
     renderBasketNetwork(basket);
   }
 };
+
+// Load SEC money-flow + sector for a set of tickers (skips those without data).
+function loadBasketSEC(tickers){
+  return Promise.all(tickers.map(function(t){
+    return fetch("data/sec/" + encodeURIComponent(t) + ".json", {cache:"default"})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .catch(function(){ return null; })
+      .then(function(sec){
+        if (!sec || !(sec["in"]||{}).revenue) return null;
+        // sector comes from baked fundamentals (via the quote file)
+        return getSeries(t).then(function(s){ return { ticker:t, sec:sec, sector:((s.fundamentals||{}).sector)||"Other" }; });
+      });
+  })).then(function(rows){ return rows.filter(Boolean); });
+}
+
+function aggregateSEC(rows){
+  var totalRev = 0, out = {}, net = 0, bySector = {};
+  rows.forEach(function(r){
+    var rev = (r.sec["in"]||{}).revenue || 0;
+    totalRev += rev; net += (r.sec.net||0);
+    var sec = bySector[r.sector] = bySector[r.sector] || {rev:0, out:{}, net:0, n:0, companies:[]};
+    sec.rev += rev; sec.net += (r.sec.net||0); sec.n++;
+    sec.companies.push({ ticker:r.ticker, rev:rev });
+    Object.keys(r.sec.out||{}).forEach(function(k){
+      out[k] = (out[k]||0) + r.sec.out[k];
+      sec.out[k] = (sec.out[k]||0) + r.sec.out[k];
+    });
+  });
+  return { totalRev:totalRev, out:out, net:net, bySector:bySector, n:rows.length };
+}
+
+function renderAggregateFlow(sourceId){
+  var root = $("#kg-canvas");
+  var src = kgSources().filter(function(s){ return s.id===sourceId; })[0];
+  if (!src || !src.tickers.length){ root.innerHTML = "<p class='muted small'>Empty scope.</p>"; return; }
+  root.innerHTML = "<p class='muted small'>Aggregating SEC filings across " + src.tickers.length + " companies" + (KG_AGG_SECTOR?(" &middot; " + esc(KG_AGG_SECTOR)):"") + "...</p>";
+  loadBasketSEC(src.tickers).then(function(rows){
+    if (!rows.length){ root.innerHTML = "<p class='muted small'>No SEC data available for this scope. Try an index or vertical of large US filers.</p>"; return; }
+    var scoped = KG_AGG_SECTOR ? rows.filter(function(r){ return r.sector===KG_AGG_SECTOR; }) : rows;
+    var agg = aggregateSEC(scoped);
+    // pseudo "company" object for the Sankey drawer
+    var d = { name: src.label + (KG_AGG_SECTOR?(" / " + KG_AGG_SECTOR):""), fy:"aggregate", "in":{revenue:agg.totalRev}, out:agg.out, net:agg.net };
+
+    var crumb = "<div class='kg-crumb'>" +
+      "<span class='" + (KG_AGG_SECTOR?"link":"") + "' id='kg-crumb-all'>" + esc(src.label) + "</span>" +
+      (KG_AGG_SECTOR ? " &rsaquo; <span>" + esc(KG_AGG_SECTOR) + "</span>" : "") +
+      "</div>";
+
+    var svg = buildFlowSVG("MARKET", d, agg.totalRev);
+    var title = KG_AGG_SECTOR ? (esc(KG_AGG_SECTOR) + " within " + esc(src.label)) : esc(src.label);
+
+    // sector breakdown (only at top level)
+    var sectorTable = "";
+    if (!KG_AGG_SECTOR){
+      var secs = Object.keys(agg.bySector).sort(function(a,b){ return agg.bySector[b].rev - agg.bySector[a].rev; });
+      sectorTable = "<div class='section-title'>Where money flows by sector (click to drill in)</div>" +
+        "<table><thead><tr><th>Sector</th><th>Cos</th><th>Revenue</th><th>R&amp;D</th><th>Capex</th><th>Shareholder returns</th><th>Net income</th></tr></thead><tbody>" +
+        secs.map(function(sec){
+          var s = agg.bySector[sec];
+          var sr = (s.out.dividends||0) + (s.out.buybacks||0);
+          return "<tr class='clickable' data-kg-sector='" + esc(sec) + "'><td><b>" + esc(sec) + "</b></td><td>" + s.n + "</td>" +
+            "<td>$" + fmtBigPlain(s.rev) + "</td><td>$" + fmtBigPlain(s.out.rnd||0) + "</td><td>$" + fmtBigPlain(s.out.capex||0) + "</td>" +
+            "<td>$" + fmtBigPlain(sr) + "</td><td class='" + (s.net>=0?"up":"down") + "'>$" + fmtBigPlain(s.net) + "</td></tr>";
+        }).join("") + "</tbody></table>";
+    }
+
+    // company breakdown within current scope
+    var companies = scoped.slice().sort(function(a,b){ return ((b.sec["in"]||{}).revenue||0) - ((a.sec["in"]||{}).revenue||0); }).slice(0, 20);
+    var coTable = "<div class='section-title'>Companies " + (KG_AGG_SECTOR?"in this sector":"in this scope") + " (click to drill to their flow)</div>" +
+      "<table><thead><tr><th>Ticker</th><th>Sector</th><th>Revenue</th><th>R&amp;D</th><th>Capex</th><th>Net income</th></tr></thead><tbody>" +
+      companies.map(function(r){
+        var o = r.sec.out||{};
+        return "<tr class='clickable' data-kg-co='" + esc(r.ticker) + "'><td><b>" + esc(r.ticker) + "</b></td><td class='muted'>" + esc(r.sector) + "</td>" +
+          "<td>$" + fmtBigPlain((r.sec["in"]||{}).revenue||0) + "</td><td>$" + fmtBigPlain(o.rnd||0) + "</td><td>$" + fmtBigPlain(o.capex||0) + "</td>" +
+          "<td class='" + ((r.sec.net||0)>=0?"up":"down") + "'>$" + fmtBigPlain(r.sec.net||0) + "</td></tr>";
+      }).join("") + "</tbody></table>";
+
+    root.innerHTML = crumb +
+      "<div class='flex-between'><h3 style='margin:6px 0'>" + title + " &mdash; aggregate money flow (" + scoped.length + " filers)</h3></div>" +
+      "<div style='overflow-x:auto'>" + svg + "</div>" +
+      "<p class='footer-note'>Aggregated from each company&#39;s latest annual SEC filing. Revenue on the left is the combined top line; the right shows combined cost of revenue, R&amp;D, SG&amp;A, taxes, net income, capex, dividends, and buybacks. R&amp;D + capex show where the group is <b>investing</b>; dividends + buybacks show capital <b>returned</b>.</p>" +
+      sectorTable + coTable;
+
+    var crumbAll = $("#kg-crumb-all"); if (crumbAll && KG_AGG_SECTOR) crumbAll.addEventListener("click", function(){ KG_AGG_SECTOR=null; renderAggregateFlow(sourceId); });
+    $all("[data-kg-sector]", root).forEach(function(tr){ tr.addEventListener("click", function(){ KG_AGG_SECTOR = tr.dataset.kgSector; renderAggregateFlow(sourceId); }); });
+    $all("[data-kg-co]", root).forEach(function(tr){ tr.addEventListener("click", function(){ lsSet("kgTicker", tr.dataset.kgCo); lsSet("kgMode","company"); showTab("moneyflow"); }); });
+  }).catch(function(e){ console.error("GMR: aggregate flow failed", e); root.innerHTML = "<p class='muted small'>Could not aggregate SEC data.</p>"; });
+}
 
 function renderCompanyFlow(ticker){
   var root = $("#kg-canvas");
@@ -3420,50 +3537,48 @@ function renderCompanyFlow(ticker){
     });
 }
 
-function drawCompanyFlow(root, ticker, d){
-  var rev = (d["in"]||{}).revenue || 0;
+// Shared Sankey builder used by both the company and aggregate views.
+function buildFlowSVG(centerLabel, d, rev){
   var outs = KG_OUT_META.map(function(m){
     var val = m[0]==="net" ? (d.net||0) : ((d.out||{})[m[0]]||0);
     return { key:m[0], label:m[1], color:m[2], val:val };
   }).filter(function(o){ return o.val && o.val > 0; });
-  if (!rev){ root.innerHTML = "<p class='muted small'>No revenue reported for " + esc(ticker) + ".</p>"; return; }
+  if (!rev || !outs.length) return "<p class='muted small'>No breakdown available.</p>";
   var maxOut = Math.max.apply(null, outs.map(function(o){ return o.val; }).concat([rev]));
 
   var W = 960, H = Math.max(360, 70 + outs.length*54), pad = 20;
-  var revY = H/2, cx = 300, coW = 150, coH = 90, coY = H/2 - coH/2, coX = cx;
+  var revY = H/2, coW = 160, coH = 90, coY = H/2 - coH/2, coX = 290;
   var rightX = 640, nodeW = 250;
   var slotH = (H - 2*pad) / outs.length;
   function lw(v){ return Math.max(2, (v/maxOut) * 46); }
   var svg = "<svg viewBox='0 0 " + W + " " + H + "' width='100%' style='max-height:" + H + "px'>";
-
-  // links company -> each out node
   outs.forEach(function(o, i){
     var y = pad + slotH*i + slotH/2;
     var x1 = coX + coW, x2 = rightX;
     svg += "<path d='M" + x1 + "," + revY + " C" + (x1+90) + "," + revY + " " + (x2-90) + "," + y + " " + x2 + "," + y + "' fill='none' stroke='" + o.color + "' stroke-opacity='.35' stroke-width='" + lw(o.val) + "'/>";
   });
-  // revenue -> company link
   svg += "<path d='M120," + revY + " C200," + revY + " 220," + revY + " " + coX + "," + revY + "' fill='none' stroke='#3ecf8e' stroke-opacity='.4' stroke-width='" + lw(rev) + "'/>";
-
-  // revenue node (money in)
   svg += "<g><rect x='20' y='" + (revY-34) + "' width='100' height='68' rx='8' fill='rgba(62,207,142,.18)' stroke='#3ecf8e'/>" +
     "<text x='70' y='" + (revY-8) + "' text-anchor='middle' fill='#e7edf7' font-size='13' font-weight='700'>Revenue</text>" +
     "<text x='70' y='" + (revY+12) + "' text-anchor='middle' fill='#3ecf8e' font-size='13' font-weight='700'>$" + fmtBigPlain(rev) + "</text></g>";
-  // company node
   svg += "<g><rect x='" + coX + "' y='" + coY + "' width='" + coW + "' height='" + coH + "' rx='10' fill='var(--panel2)' stroke='#4fd1c5' stroke-width='1.5'/>" +
-    "<text x='" + (coX+coW/2) + "' y='" + (coY+38) + "' text-anchor='middle' fill='#e7edf7' font-size='17' font-weight='800'>" + esc(ticker) + "</text>" +
-    "<text x='" + (coX+coW/2) + "' y='" + (coY+60) + "' text-anchor='middle' fill='#93a2bb' font-size='11'>FY " + esc((d.fy||"").slice(0,4)) + "</text></g>";
-  // out nodes
+    "<text x='" + (coX+coW/2) + "' y='" + (coY+38) + "' text-anchor='middle' fill='#e7edf7' font-size='16' font-weight='800'>" + esc(centerLabel) + "</text>" +
+    "<text x='" + (coX+coW/2) + "' y='" + (coY+60) + "' text-anchor='middle' fill='#93a2bb' font-size='11'>" + (d.fy==="aggregate"?"aggregate":("FY " + esc((d.fy||"").slice(0,4)))) + "</text></g>";
   outs.forEach(function(o, i){
     var y = pad + slotH*i + slotH/2;
     var pct = rev ? (o.val/rev*100) : 0;
-    svg += "<g class='kg-node' style='cursor:default'>" +
-      "<rect x='" + rightX + "' y='" + (y-18) + "' width='" + nodeW + "' height='36' rx='7' fill='" + o.color + "' fill-opacity='.16' stroke='" + o.color + "' stroke-opacity='.6'/>" +
+    svg += "<g><rect x='" + rightX + "' y='" + (y-18) + "' width='" + nodeW + "' height='36' rx='7' fill='" + o.color + "' fill-opacity='.16' stroke='" + o.color + "' stroke-opacity='.6'/>" +
       "<text x='" + (rightX+12) + "' y='" + (y+5) + "' fill='#e7edf7' font-size='12.5' font-weight='700'>" + esc(o.label) + "</text>" +
       "<text x='" + (rightX+nodeW-12) + "' y='" + (y+5) + "' text-anchor='end' fill='#e7edf7' font-size='12.5'>$" + fmtBigPlain(o.val) + " &#183; " + pct.toFixed(0) + "%</text></g>";
   });
   svg += "</svg>";
+  return svg;
+}
 
+function drawCompanyFlow(root, ticker, d){
+  var rev = (d["in"]||{}).revenue || 0;
+  if (!rev){ root.innerHTML = "<p class='muted small'>No revenue reported for " + esc(ticker) + ".</p>"; return; }
+  var svg = buildFlowSVG(ticker, d, rev);
   root.innerHTML =
     "<div class='flex-between'><h3 style='margin:0'>" + esc(d.name||ticker) + " &mdash; money flow (FY " + esc((d.fy||"").slice(0,4)) + ")</h3>" +
       "<button class='btn small ghost' id='kg-open-co'>Open " + esc(ticker) + " &rarr;</button></div>" +
@@ -3471,7 +3586,7 @@ function drawCompanyFlow(root, ticker, d){
     "<p class='footer-note'>Money in (revenue) on the left flows through " + esc(ticker) + " to its cost, investment, and capital-return allocations on the right. " +
       "Percentages are of revenue. Income-statement items (cost of revenue, R&amp;D, SG&amp;A, interest, taxes, net income) and cash-flow items " +
       "(capex, dividends, buybacks) are both shown. Source: SEC XBRL company facts, latest annual filing.</p>";
-  $("#kg-open-co").addEventListener("click", function(){ CO_TICKER = ticker; lsSet("companiesTicker", ticker); showTab("companies"); });
+  var ob = $("#kg-open-co"); if (ob) ob.addEventListener("click", function(){ CO_TICKER = ticker; lsSet("companiesTicker", ticker); showTab("companies"); });
 }
 
 // compact $ for SVG labels (no leading $)
