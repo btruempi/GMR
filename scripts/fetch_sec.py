@@ -145,7 +145,9 @@ def main():
             print(f"[{i}/{len(tickers)}] {t}: FAILED ({e})")
         time.sleep(SLEEP)
 
-    index = {"tickers": sorted([t for t in tickers if os.path.exists(os.path.join(OUT_DIR, t.replace('/','-') + '.json'))])}
+    from datetime import datetime, timezone
+    index = {"updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+             "tickers": sorted([t for t in tickers if os.path.exists(os.path.join(OUT_DIR, t.replace('/','-') + '.json'))])}
     with open(os.path.join(OUT_DIR, "_index.json"), "w", encoding="utf-8") as f:
         json.dump(index, f, separators=(",", ":"))
     print(f"\n[GMR] SEC data: {ok} baked, {len(failed)} without usable data.")

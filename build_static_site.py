@@ -27,7 +27,9 @@ def load_text(rel_path):
 
 
 def build_seed_data():
+    from datetime import datetime, timezone
     return {
+        "built": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "constituents": load_json("constituents.json"),
         "catalysts": load_json("catalysts.json"),
         "preIpo": load_json("pre_ipo.json"),
@@ -137,6 +139,14 @@ label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px;margin
 .mkt-status.open .dot{background:var(--up);box-shadow:0 0 0 3px rgba(62,207,142,.18)}
 .mkt-status.closed .dot{background:var(--down)}
 .topbar-inner .mkt-status{margin-left:8px}
+.data-fresh{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:var(--muted);
+  padding:5px 10px;border:1px solid var(--border);border-radius:99px;white-space:nowrap;margin-left:6px;cursor:pointer}
+.data-fresh:hover{border-color:var(--accent);color:var(--text)}
+.data-fresh .fdot{width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.data-fresh.fresh .fdot{background:var(--up)}
+.data-fresh.stale .fdot{background:#e0a63a}
+.data-fresh.old .fdot{background:var(--down)}
+@media(max-width:720px){.data-fresh{display:none}}
 footer.sitefoot{border-top:1px solid var(--border);margin-top:40px;padding:26px 20px;color:var(--muted);font-size:12.5px}
 footer.sitefoot .wrap{max-width:var(--maxw);margin:0 auto;display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
 footer.sitefoot b{color:var(--text)}
@@ -249,6 +259,7 @@ HTML_TEMPLATE = r"""<!doctype html>
   <div class="topbar-inner">
     <div class="brand">Growth<span>Markets</span> Research</div>
     <span class="mkt-status" id="mkt-status"><span class="dot"></span><span id="mkt-status-text">Market</span></span>
+    <span class="data-fresh" id="data-fresh" title="Data freshness" onclick="showTab('methodology')"><span class="fdot"></span><span id="data-fresh-text">Prices --</span></span>
     <div class="topsearch-wrap" id="topsearch-wrap">
       <form class="topsearch" id="topsearch" autocomplete="off">
         <input id="topsearch-input" type="text" placeholder="Search ticker or company" aria-label="Search ticker or company">
@@ -355,6 +366,22 @@ function fmtDateTs(ts){
   var d = new Date(ts * 1000);
   if (isNaN(d.getTime())) return "--";
   return d.toLocaleDateString("en-US", {year:"numeric", month:"short", day:"numeric"});
+}
+// relative time from an ISO string, e.g. "12 min ago", "2 hr ago", "3 days ago"
+function fmtAgo(iso){
+  if (!iso) return "unknown";
+  var then = new Date(iso).getTime();
+  if (isNaN(then)) return "unknown";
+  var s = Math.max(0, (Date.now() - then) / 1000);
+  if (s < 90) return "just now";
+  if (s < 3600) return Math.round(s/60) + " min ago";
+  if (s < 86400) return Math.round(s/3600) + " hr ago";
+  var d = Math.round(s/86400);
+  return d + " day" + (d===1?"":"s") + " ago";
+}
+function fmtAbs(iso){
+  var d = new Date(iso);
+  return isNaN(d.getTime()) ? "" : d.toLocaleString();
 }
 function pctClass(v){ return (v == null || isNaN(v)) ? "" : (v >= 0 ? "up" : "down"); }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
@@ -931,6 +958,47 @@ function updateMarketStatus(){
   txt.textContent = open ? "Market open" : "Market closed";
 }
 
+// Freshness of the baked data. Prices refresh every 30 min (market hours);
+// SEC financials weekly; relationships/news are a curated feed.
+function dataFreshness(){
+  var q = (window.GMR_QUOTES_INDEX && window.GMR_QUOTES_INDEX.updated) || null;
+  var s = (window.GMR_SEC_INDEX && window.GMR_SEC_INDEX.updated) || null;
+  var rel = null, built = null;
+  try { rel = (window.GMR_DATA && window.GMR_DATA.relationships && window.GMR_DATA.relationships.updated) || null; } catch(e){}
+  try { built = (window.GMR_DATA && window.GMR_DATA.built) || null; } catch(e){}
+  // the events/news calendar is a curated feed -- its "as of" is the last build
+  return {prices:q, financials:s, relationships:rel, news:built};
+}
+// A one-line, human-readable freshness summary reused across tabs.
+function freshnessLine(){
+  var f = dataFreshness();
+  var parts = [];
+  parts.push("Prices <b>" + (f.prices ? fmtAgo(f.prices) : "baked") + "</b>" + (f.prices?(" (" + fmtAbs(f.prices) + ")"):""));
+  if (f.financials) parts.push("financials updated <b>" + fmtAgo(f.financials) + "</b>");
+  if (f.news) parts.push("events/news feed as of <b>" + fmtAgo(f.news) + "</b> (curated)");
+  return "&#128337; " + parts.join(" &middot; ");
+}
+// One row of the Methodology freshness table.
+function freshRow(label, iso, source, cadence){
+  var when = iso ? (fmtAgo(iso) + " <span class='muted'>(" + fmtAbs(iso) + ")</span>") : "<span class='muted'>baked at build</span>";
+  return "<tr><td style='vertical-align:top'><b>" + label + "</b><br><span class='muted small'>" + source + "</span></td>" +
+         "<td style='vertical-align:top'>" + when + "<br><span class='muted small'>" + cadence + "</span></td></tr>";
+}
+function updateDataFreshness(){
+  var el = document.getElementById("data-fresh");
+  var txt = document.getElementById("data-fresh-text");
+  if (!el || !txt) return;
+  var f = dataFreshness();
+  if (!f.prices){ el.className = "data-fresh"; txt.textContent = "Prices: baked"; el.title = "Price refresh time unavailable"; return; }
+  var ageMin = (Date.now() - new Date(f.prices).getTime()) / 60000;
+  var cls = ageMin < 90 ? "fresh" : (ageMin < 60*36 ? "stale" : "old");
+  el.className = "data-fresh " + cls;
+  txt.textContent = "Prices " + fmtAgo(f.prices);
+  el.title = "Prices updated " + fmtAbs(f.prices)
+           + (f.financials ? "\nFinancials updated " + fmtAbs(f.financials) : "")
+           + "\nClick for data sources & methodology";
+}
+
 // Local universe (ticker + name) from constituents + presets, for instant
 // results and as a fallback when the live search API is unreachable.
 function localSearchIndex(){
@@ -1047,7 +1115,11 @@ function init(){
   updateMarketStatus();
   setInterval(updateMarketStatus, 60000);
   // load the SEC-filer index so Money Flow can offer the whole-market scope
-  fetch("data/sec/_index.json", {cache:"default"}).then(function(r){ return r.ok?r.json():null; }).then(function(j){ if(j) window.GMR_SEC_INDEX = j; }).catch(function(){});
+  fetch("data/sec/_index.json", {cache:"default"}).then(function(r){ return r.ok?r.json():null; }).then(function(j){ if(j){ window.GMR_SEC_INDEX = j; updateDataFreshness(); } }).catch(function(){});
+  // load the quotes index -- carries the timestamp of the last price refresh
+  fetch("data/quotes/_index.json", {cache:"no-store"}).then(function(r){ return r.ok?r.json():null; }).then(function(j){ if(j){ window.GMR_QUOTES_INDEX = j; updateDataFreshness(); } }).catch(function(){});
+  updateDataFreshness();
+  setInterval(updateDataFreshness, 60000);
   var initial = (location.hash||"").replace("#","");
   var valid = TABS.some(function(t){ return t.key===initial; });
   showTab(valid ? initial : "dashboard");
@@ -2641,6 +2713,7 @@ RENDERERS.updates = function(root){
     "<div class='card'>" +
       "<h2>Updates</h2>" +
       "<p class='muted small'>Catalyst calendar and news, merged and sorted newest-first.</p>" +
+      "<p class='muted small' style='margin-top:-4px'>" + freshnessLine() + "</p>" +
       "<div class='row'>" +
         "<span class='chip" + (UP_TYPE==="all"?" active":"") + "' data-type='all'>All</span>" +
         "<span class='chip" + (UP_TYPE==="catalyst"?" active":"") + "' data-type='catalyst'>Catalysts</span>" +
@@ -3254,6 +3327,16 @@ RENDERERS.methodology = function(root){
   var wlKeys = activeWatchlistKeys();
   if (!METH_MODE) METH_MODE = "idx:" + STATE.activeIndex;
   root.innerHTML =
+    "<div class='card'>" +
+      "<h2>Data freshness &amp; sources</h2>" +
+      "<p class='muted small'>" + freshnessLine() + "</p>" +
+      "<table style='margin-top:6px'><tbody>" +
+        freshRow("Prices &amp; technical analytics", dataFreshness().prices, "Yahoo Finance / Stooq daily OHLCV", "auto-refreshes every 30 min during US market hours; closing bar captured ~45 min after the close") +
+        freshRow("Company financials", dataFreshness().financials, "SEC EDGAR XBRL company-facts", "refreshed weekly") +
+        freshRow("Events / news feed", dataFreshness().news, "Curated calendar (earnings, catalysts)", "hand-maintained; updated at each build") +
+        freshRow("Relationship graph", dataFreshness().relationships, "SEC filings, investor decks, public reporting", "curated; illustrative, not exhaustive") +
+      "</tbody></table>" +
+    "</div>" +
     "<div class='card'>" +
       "<h2>Methodology</h2>" +
       "<label>Show methodology for</label>" +
