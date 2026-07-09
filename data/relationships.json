@@ -1,5 +1,6 @@
 {
   "_note": "Hand-curated, illustrative inter-company relationships for the tracked universe, sourced from public filings, earnings materials, and widely reported news. Not exhaustive and not investment advice. Competitor edges are also auto-derived from industry classification at render time.",
+  "updated": "2026-07",
   "types": {
     "supply":   {"label": "Supply chain (vertical)", "color": "#4fd1c5", "directed": true,  "desc": "The source SUPPLIES the target (goods/parts flow source->target; money flows the other way). Buying a supplier is a vertical acquisition."},
     "customer": {"label": "Major customer (B2B)",    "color": "#5b8cff", "directed": true,  "desc": "The target is a major B2B customer of the source (source sells parts/services to target for use in its own products)."},
@@ -82,6 +83,83 @@
 
     {"a": "V",    "b": "MA",   "type": "compete", "note": "card networks"},
     {"a": "PYPL", "b": "SQ",   "type": "compete", "note": "digital payments"},
-    {"a": "COIN", "b": "HOOD", "type": "compete", "note": "crypto/retail brokerage"}
+    {"a": "COIN", "b": "HOOD", "type": "compete", "note": "crypto/retail brokerage"},
+
+    {"a": "VST",  "b": "MSFT", "type": "customer","note": "data-center power"},
+    {"a": "VST",  "b": "AMZN", "type": "customer","note": "data-center power"},
+    {"a": "GEV",  "b": "CEG",  "type": "supply",  "note": "grid & power equipment"},
+    {"a": "GEV",  "b": "VST",  "type": "supply",  "note": "turbines/grid gear"},
+    {"a": "EQIX", "b": "MSFT", "type": "customer","note": "colocation for cloud"},
+    {"a": "DLR",  "b": "META", "type": "customer","note": "data-center capacity"},
+    {"a": "EQIX", "b": "DLR",  "type": "compete", "note": "data-center REITs"},
+    {"a": "VRT",  "b": "EQIX", "type": "supply",  "note": "power & cooling gear"},
+
+    {"a": "SNOW", "b": "AMZN", "type": "supply",  "note": "runs on AWS (COGS)"},
+    {"a": "DDOG", "b": "AMZN", "type": "supply",  "note": "hosted on AWS"},
+    {"a": "NET",  "b": "CRWD", "type": "partner", "note": "security ecosystem"},
+    {"a": "CRM",  "b": "NOW",  "type": "compete", "note": "enterprise SaaS"},
+    {"a": "CRM",  "b": "WDAY", "type": "compete", "note": "enterprise apps"},
+    {"a": "SNOW", "b": "MDB",  "type": "compete", "note": "data platforms"},
+    {"a": "DDOG", "b": "NET",  "type": "compete", "note": "cloud infra software"},
+    {"a": "PANW", "b": "FTNT", "type": "compete", "note": "network security"},
+    {"a": "ZS",   "b": "NET",  "type": "compete", "note": "zero-trust / edge"},
+    {"a": "S",    "b": "CRWD", "type": "compete", "note": "endpoint security"},
+    {"a": "PLTR", "b": "MSFT", "type": "partner", "note": "AI/gov cloud"},
+    {"a": "NOW",  "b": "NVDA", "type": "partner", "note": "enterprise AI"},
+
+    {"a": "ILMN", "b": "NTRA", "type": "supply",  "note": "sequencers/consumables"},
+    {"a": "ILMN", "b": "EXAS", "type": "supply",  "note": "sequencing platform"},
+    {"a": "ILMN", "b": "PACB", "type": "compete", "note": "gene sequencing"},
+    {"a": "CRSP", "b": "NTLA", "type": "compete", "note": "gene editing"},
+    {"a": "VRTX", "b": "CRSP", "type": "partner", "note": "Casgevy gene therapy"},
+    {"a": "REGN", "b": "GILD", "type": "compete", "note": "big biotech"},
+    {"a": "VRTX", "b": "REGN", "type": "compete", "note": "big biotech"},
+    {"a": "ISRG", "b": "MDT",  "type": "compete", "note": "surgical/medtech"},
+    {"a": "DXCM", "b": "ABT",  "type": "compete", "note": "glucose monitoring"},
+
+    {"a": "AMZN", "b": "SHOP", "type": "compete", "note": "e-commerce platforms"},
+    {"a": "SHOP", "b": "V",    "type": "partner", "note": "payments rails"},
+    {"a": "ETSY", "b": "EBAY", "type": "compete", "note": "online marketplaces"},
+    {"a": "CHWY", "b": "AMZN", "type": "compete", "note": "pet e-commerce vs retail"},
+    {"a": "NFLX", "b": "DIS",  "type": "compete", "note": "streaming"},
+    {"a": "SPOT", "b": "AAPL", "type": "compete", "note": "music streaming"},
+    {"a": "RBLX", "b": "EA",   "type": "compete", "note": "gaming"},
+    {"a": "EA",   "b": "TTWO", "type": "compete", "note": "game publishers"},
+
+    {"a": "QS",   "b": "TSLA", "type": "supply",  "note": "solid-state battery R&D"},
+    {"a": "PLL",  "b": "TSLA", "type": "supply",  "note": "lithium hydroxide"},
+    {"a": "FSLR", "b": "ENPH", "type": "compete", "note": "solar"},
+    {"a": "ENPH", "b": "SEDG", "type": "compete", "note": "inverters"},
+    {"a": "RUN",  "b": "NOVA", "type": "compete", "note": "residential solar"},
+    {"a": "PLUG", "b": "BE",   "type": "compete", "note": "hydrogen/fuel cells"},
+    {"a": "BLDP", "b": "PLUG", "type": "compete", "note": "fuel cells"},
+
+    {"a": "DE",   "b": "CTVA", "type": "partner", "note": "ag equipment + inputs"},
+    {"a": "CF",   "b": "MOS",  "type": "compete", "note": "fertilizers"},
+    {"a": "ADM",  "b": "BG",   "type": "compete", "note": "ag commodities"},
+
+    {"a": "RKLB", "b": "LUNR", "type": "compete", "note": "space launch/services"},
+    {"a": "PL",   "b": "IRDM", "type": "compete", "note": "satellite data/comms"},
+    {"a": "AVAV", "b": "KTOS", "type": "compete", "note": "drones/defense tech"},
+    {"a": "USAR", "b": "GM",   "type": "supply",  "note": "rare-earth magnets to autos"},
+
+    {"a": "COIN", "b": "MSTR", "type": "compete", "note": "crypto exposure"},
+    {"a": "MARA", "b": "RIOT", "type": "compete", "note": "bitcoin mining"},
+    {"a": "SOFI", "b": "AFRM", "type": "compete", "note": "consumer fintech/lending"},
+    {"a": "FI",   "b": "GPN",  "type": "compete", "note": "payment processing"},
+
+    {"a": "DAL",  "b": "UAL",  "type": "compete", "note": "airlines"},
+    {"a": "UAL",  "b": "AAL",  "type": "compete", "note": "airlines"},
+    {"a": "DHI",  "b": "LEN",  "type": "compete", "note": "homebuilders"},
+    {"a": "LEN",  "b": "PHM",  "type": "compete", "note": "homebuilders"},
+
+    {"a": "AMD",  "b": "MSFT", "type": "customer","note": "data-center CPUs/GPUs"},
+    {"a": "AMD",  "b": "AMZN", "type": "customer","note": "EPYC in AWS"},
+    {"a": "MU",   "b": "AMD",  "type": "supply",  "note": "memory"},
+    {"a": "AVGO", "b": "GOOGL","type": "supply",  "note": "custom AI accelerators (TPUs)"},
+    {"a": "MRVL", "b": "AMZN", "type": "supply",  "note": "custom silicon"},
+    {"a": "ON",   "b": "TSLA", "type": "supply",  "note": "power semis for EVs"},
+    {"a": "ADI",  "b": "AAPL", "type": "supply",  "note": "analog/mixed-signal"},
+    {"a": "TXN",  "b": "ADI",  "type": "compete", "note": "analog chips"}
   ]
 }

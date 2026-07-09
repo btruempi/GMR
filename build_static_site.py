@@ -3533,7 +3533,8 @@ function kgSources(){
 }
 
 RENDERERS.moneyflow = function(root){
-  var mode = lsGet("kgMode", "company");
+  var mode = lsGet("kgMode", "relationships");
+  var relScope = lsGet("kgRelScope", "company");
   var ticker = lsGet("kgTicker", CO_TICKER || "NVDA");
   var sources = kgSources();
   var basket = lsGet("kgBasket", "idx:" + STATE.activeIndex);
@@ -3550,17 +3551,27 @@ RENDERERS.moneyflow = function(root){
           "<button data-kg='company'" + (mode==="company"?" class='on'":"") + ">Company spend</button>" +
           "<button data-kg='aggregate'" + (mode==="aggregate"?" class='on'":"") + ">Aggregate (macro)</button>" +
         "</div>" +
-        (mode==="aggregate"
-          ? "<div><label>Scope</label><select id='kg-basket'>" + sources.map(function(s){ return "<option value='" + esc(s.id) + "'" + (s.id===basket?" selected":"") + ">" + esc(s.label) + "</option>"; }).join("") + "</select></div>"
-          : "<div><label>Center company</label><input id='kg-ticker' type='text' value='" + esc(ticker) + "' style='width:130px;text-transform:uppercase'></div><div style='display:flex;align-items:flex-end'><button class='btn small' id='kg-load'>Show</button></div>") +
+        (mode==="relationships"
+          ? "<div class='seg' id='kg-relscope'><button data-scope='company'" + (relScope==="company"?" class='on'":"") + ">Company-centered</button><button data-scope='basket'" + (relScope==="basket"?" class='on'":"") + ">Vertical / index web</button></div>" +
+            (relScope==="company"
+              ? "<div><label>Center company</label><input id='kg-ticker' type='text' value='" + esc(ticker) + "' style='width:130px;text-transform:uppercase'></div><div style='display:flex;align-items:flex-end'><button class='btn small' id='kg-load'>Show</button></div>"
+              : "<div><label>Basket</label><select id='kg-basket'>" + sources.map(function(s){ return "<option value='" + esc(s.id) + "'" + (s.id===basket?" selected":"") + ">" + esc(s.label) + "</option>"; }).join("") + "</select></div>")
+          : mode==="aggregate"
+            ? "<div><label>Scope</label><select id='kg-basket'>" + sources.map(function(s){ return "<option value='" + esc(s.id) + "'" + (s.id===basket?" selected":"") + ">" + esc(s.label) + "</option>"; }).join("") + "</select></div>"
+            : "<div><label>Ticker</label><input id='kg-ticker' type='text' value='" + esc(ticker) + "' style='width:130px;text-transform:uppercase'></div><div style='display:flex;align-items:flex-end'><button class='btn small' id='kg-load'>Show</button></div>") +
       "</div>" +
     "</div>" +
     "<div class='card' id='kg-canvas'><p class='muted small'>Loading...</p></div>";
 
   $all("#kg-mode button", root).forEach(function(b){ b.addEventListener("click", function(){ lsSet("kgMode", b.getAttribute("data-kg")); KG_AGG_SECTOR=null; showTab("moneyflow"); }); });
+  $all("#kg-relscope button", root).forEach(function(b){ b.addEventListener("click", function(){ lsSet("kgRelScope", b.getAttribute("data-scope")); showTab("moneyflow"); }); });
+
   if (mode==="aggregate"){
     $("#kg-basket").addEventListener("change", function(e){ lsSet("kgBasket", e.target.value); KG_AGG_SECTOR=null; renderAggregateFlow(e.target.value); });
     renderAggregateFlow(basket);
+  } else if (mode==="relationships" && relScope==="basket"){
+    $("#kg-basket").addEventListener("change", function(e){ lsSet("kgBasket", e.target.value); renderBasketWeb(e.target.value); });
+    renderBasketWeb(basket);
   } else {
     var load = function(){ var t=($("#kg-ticker").value||"").trim().toUpperCase(); if(t){ lsSet("kgTicker", t); if(mode==="company") renderCompanyFlow(t); else renderRelationships(t); } };
     $("#kg-load").addEventListener("click", load);
@@ -3671,6 +3682,117 @@ function bindRelFilter(root, center, enabled){
       if (i===-1) set.push(t); else set.splice(i,1);
       KG_REL_FILTER = set.length ? set : Object.keys(STATE.relationships.types);
       renderRelationships(center);
+    });
+  });
+}
+
+// ---- Basket web: force-directed graph of ALL curated ties among a whole
+// watchlist / vertical / index, to reveal cluster-wide dependencies (e.g.,
+// how much of a basket funnels through one supplier).
+function renderBasketWeb(sourceId){
+  var root = $("#kg-canvas");
+  var types = STATE.relationships.types || {};
+  var enabled = KG_REL_FILTER || Object.keys(types);
+  var src = kgSources().filter(function(s){ return s.id===sourceId; })[0];
+  if (!src || !src.tickers.length){ root.innerHTML = "<p class='muted small'>Empty basket.</p>"; return; }
+  var inBasket = {}; src.tickers.forEach(function(t){ inBasket[t.toUpperCase()]=1; });
+
+  var edges = (STATE.relationships.edges||[]).filter(function(e){
+    return enabled.indexOf(e.type)!==-1 && inBasket[e.a] && inBasket[e.b];
+  });
+  // nodes = basket members that participate in at least one shown edge
+  var nodeSet = {};
+  edges.forEach(function(e){ nodeSet[e.a]=1; nodeSet[e.b]=1; });
+  var nodes = Object.keys(nodeSet);
+
+  var legend = "<div class='row' id='kg-rel-filter' style='margin-bottom:6px'>" +
+    Object.keys(types).map(function(t){
+      var on = enabled.indexOf(t)!==-1;
+      return "<span class='chip" + (on?" active":"") + "' data-rel-type='" + esc(t) + "' title='" + esc(types[t].desc) + "'><span class='badge-dot' style='background:" + types[t].color + "'></span>" + esc(types[t].label) + "</span>";
+    }).join("") + "</div>";
+
+  if (nodes.length < 2){
+    root.innerHTML = legend + "<p class='muted small'>No curated relationships among the members of <b>" + esc(src.label) + "</b> yet. Try a vertical with dense ties like Semiconductors, AI Infrastructure, or Nuclear, or the Entire tracked market.</p>";
+    bindBasketWebFilter(root, sourceId, enabled);
+    return;
+  }
+
+  // market caps for node sizing (from baked fundamentals)
+  Promise.all(nodes.map(function(t){ return getSeries(t).then(function(s){ return {t:t, cap:(s.fundamentals&&s.fundamentals.marketCap)||0}; }); })).then(function(caps){
+    var capBy = {}; caps.forEach(function(c){ capBy[c.t]=c.cap; });
+    var maxCap = Math.max.apply(null, caps.map(function(c){ return c.cap; }).concat([1]));
+
+    // --- lightweight force-directed layout ---
+    var W = 980, H = Math.max(520, 220 + nodes.length*12);
+    var P = {}; nodes.forEach(function(n, i){ var a=(i/nodes.length)*Math.PI*2; P[n]={x:W/2+Math.cos(a)*180+ (Math.random()*20-10), y:H/2+Math.sin(a)*180+(Math.random()*20-10), vx:0, vy:0}; });
+    var adj = {}; edges.forEach(function(e){ (adj[e.a]=adj[e.a]||[]).push(e.b); (adj[e.b]=adj[e.b]||[]).push(e.a); });
+    var k = 170; // ideal edge length
+    for (var iter=0; iter<220; iter++){
+      // repulsion
+      for (var i=0;i<nodes.length;i++){ for (var j=i+1;j<nodes.length;j++){
+        var a=P[nodes[i]], b=P[nodes[j]];
+        var dx=a.x-b.x, dy=a.y-b.y, d2=dx*dx+dy*dy+0.01, d=Math.sqrt(d2);
+        var f = (k*k)/d2 * 0.9;
+        var fx=dx/d*f, fy=dy/d*f;
+        a.vx+=fx; a.vy+=fy; b.vx-=fx; b.vy-=fy;
+      }}
+      // attraction along edges
+      edges.forEach(function(e){
+        var a=P[e.a], b=P[e.b];
+        var dx=b.x-a.x, dy=b.y-a.y, d=Math.sqrt(dx*dx+dy*dy)+0.01;
+        var f=(d-k)/d * 0.06;
+        var fx=dx*f, fy=dy*f;
+        a.vx+=fx; a.vy+=fy; b.vx-=fx; b.vy-=fy;
+      });
+      // integrate + gravity to center + damping
+      nodes.forEach(function(n){
+        var p=P[n];
+        p.vx += (W/2 - p.x)*0.004; p.vy += (H/2 - p.y)*0.004;
+        p.x += Math.max(-14, Math.min(14, p.vx)); p.y += Math.max(-14, Math.min(14, p.vy));
+        p.vx*=0.82; p.vy*=0.82;
+        p.x=Math.max(40, Math.min(W-40, p.x)); p.y=Math.max(40, Math.min(H-40, p.y));
+      });
+    }
+
+    // degree (dependency centrality) for labeling hubs
+    var deg = {}; nodes.forEach(function(n){ deg[n]=(adj[n]||[]).length; });
+    var hubs = nodes.slice().sort(function(a,b){ return deg[b]-deg[a]; }).slice(0,3);
+
+    var svg = "<svg viewBox='0 0 " + W + " " + H + "' width='100%' style='max-height:" + H + "px'>" +
+      "<defs><marker id='kgarrow2' markerWidth='9' markerHeight='9' refX='7' refY='3' orient='auto'><path d='M0,0 L7,3 L0,6 Z' fill='#93a2bb'/></marker></defs>";
+    edges.forEach(function(e){
+      var a=P[e.a], b=P[e.b]; var t=types[e.type]||{};
+      var dx=b.x-a.x, dy=b.y-a.y, len=Math.sqrt(dx*dx+dy*dy)||1, ux=dx/len, uy=dy/len;
+      var ra=14+Math.sqrt((capBy[e.a]||0)/maxCap)*16, rb=14+Math.sqrt((capBy[e.b]||0)/maxCap)*16;
+      var x1=a.x+ux*ra, y1=a.y+uy*ra, x2=b.x-ux*(rb+4), y2=b.y-uy*(rb+4);
+      svg += "<line x1='"+x1.toFixed(1)+"' y1='"+y1.toFixed(1)+"' x2='"+x2.toFixed(1)+"' y2='"+y2.toFixed(1)+"' stroke='"+(t.color||"#93a2bb")+"' stroke-opacity='.5' stroke-width='1.8'"+(t.directed?" marker-end='url(#kgarrow2)'":"")+"><title>"+esc(e.a+" -> "+e.b+": "+(t.label||e.type)+(e.note?(" ("+e.note+")"):""))+"</title></line>";
+    });
+    nodes.forEach(function(n){
+      var p=P[n]; var rad=14+Math.sqrt((capBy[n]||0)/maxCap)*16;
+      var isHub = hubs.indexOf(n)!==-1;
+      svg += "<g class='kg-rnode' data-web-node='"+esc(n)+"' style='cursor:pointer'>" +
+        "<circle cx='"+p.x.toFixed(1)+"' cy='"+p.y.toFixed(1)+"' r='"+rad.toFixed(1)+"' fill='"+(isHub?"rgba(79,209,197,.22)":"var(--panel2)")+"' stroke='"+(isHub?"#4fd1c5":"#26324a")+"' stroke-width='"+(isHub?2:1.4)+"'/>" +
+        "<text x='"+p.x.toFixed(1)+"' y='"+(p.y+4).toFixed(1)+"' text-anchor='middle' fill='#e7edf7' font-size='11' font-weight='700'>"+esc(n)+"</text></g>";
+    });
+    svg += "</svg>";
+
+    root.innerHTML = legend +
+      "<div class='flex-between'><h3 style='margin:2px 0'>" + esc(src.label) + " &mdash; relationship web (" + nodes.length + " companies, " + edges.length + " ties)</h3></div>" +
+      "<p class='muted small' style='margin:0 0 6px'>Node size = market cap. The most-connected names (highlighted) are the cluster&#39;s key dependencies &mdash; e.g., a supplier the whole group relies on. Click a node to focus its own web.</p>" +
+      "<div style='overflow-x:auto'>" + svg + "</div>" +
+      "<p class='footer-note'>Most-connected in this basket: <b>" + hubs.map(esc).join(", ") + "</b>. Curated relationships as of " + esc(STATE.relationships.updated||"") + " &mdash; illustrative, not exhaustive.</p>";
+
+    $all("[data-web-node]", root).forEach(function(el){ el.addEventListener("click", function(){ lsSet("kgTicker", el.getAttribute("data-web-node")); lsSet("kgRelScope","company"); showTab("moneyflow"); }); });
+    bindBasketWebFilter(root, sourceId, enabled);
+  }).catch(function(e){ console.error("GMR: basket web failed", e); root.innerHTML = legend + "<p class='muted small'>Could not build the web.</p>"; });
+}
+function bindBasketWebFilter(root, sourceId, enabled){
+  $all("[data-rel-type]", root).forEach(function(chip){
+    chip.addEventListener("click", function(){
+      var t = chip.dataset.relType; var set = enabled.slice(); var i = set.indexOf(t);
+      if (i===-1) set.push(t); else set.splice(i,1);
+      KG_REL_FILTER = set.length ? set : Object.keys(STATE.relationships.types);
+      renderBasketWeb(sourceId);
     });
   });
 }
