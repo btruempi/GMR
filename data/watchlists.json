@@ -3,9 +3,160 @@
   "lists": {
     "nuclear": {
       "label": "Nuclear",
-      "desc": "Featured index constituents — uranium miners, enrichment, utilities, and SMR developers.",
-      "tickers": ["CCJ", "CEG", "LEU", "BWXT", "VST", "SMR", "OKLO", "UEC", "UUUU", "DNN", "NXE", "GEV", "TLN", "NNE", "FLR"],
-      "indicators": {"sma": true, "ema": false, "rsi": true, "bollinger": false, "macd": true, "vwap": false}
+      "desc": "Featured index constituents — uranium miners, enrichment, utilities, SMR developers.",
+      "tickers": [
+        "CCJ",
+        "CEG",
+        "LEU",
+        "BWXT",
+        "VST",
+        "SMR",
+        "OKLO",
+        "UEC",
+        "UUUU",
+        "DNN",
+        "NXE",
+        "GEV",
+        "TLN",
+        "NNE",
+        "FLR"
+      ],
+      "indicators": {
+        "sma": true,
+        "ema": false,
+        "rsi": true,
+        "bollinger": false,
+        "macd": true,
+        "vwap": false
+      }
+    },
+    "ai_apps": {
+      "label": "AI Applications",
+      "desc": "Software companies building products on top of AI models.",
+      "tickers": [
+        "MSFT",
+        "GOOGL",
+        "META",
+        "PLTR",
+        "CRM",
+        "NOW",
+        "SNOW",
+        "PATH",
+        "ADBE",
+        "IBM",
+        "ORCL",
+        "STX",
+        "WDC",
+        "MU",
+        "INTC",
+        "TSLA"
+      ],
+      "indicators": {
+        "sma": true,
+        "ema": false,
+        "rsi": true,
+        "bollinger": false,
+        "macd": true,
+        "vwap": false
+      }
+    },
+    "neurotech": {
+      "label": "Neurotech",
+      "desc": "",
+      "tickers": [],
+      "indicators": {
+        "sma": true,
+        "ema": false,
+        "rsi": true,
+        "bollinger": false,
+        "macd": true,
+        "vwap": false
+      }
+    },
+    "non-energy-mining": {
+      "label": "Non-Energy Mining",
+      "desc": "",
+      "tickers": [
+        "NEM",
+        "AEM",
+        "GOLD",
+        "FCX",
+        "BHP",
+        "MP",
+        "RIO",
+        "VALE",
+        "TECK",
+        "SCCO",
+        "ALB",
+        "SQM",
+        "FNV",
+        "WPM",
+        "RGLD",
+        "SGML",
+        "PPTA",
+        "UUUU",
+        "CRML",
+        "LAAC"
+      ],
+      "indicators": {
+        "sma": true,
+        "ema": false,
+        "rsi": true,
+        "bollinger": false,
+        "macd": true,
+        "vwap": false
+      }
+    },
+    "semiconductors": {
+      "label": "Semiconductors",
+      "desc": "Chip designers, foundries, and equipment makers.",
+      "tickers": [
+        "NVDA",
+        "AMD",
+        "AVGO",
+        "TSM",
+        "INTC",
+        "QCOM",
+        "TXN",
+        "MU",
+        "ASML",
+        "AMAT",
+        "LRCX",
+        "KLAC",
+        "ON",
+        "MRVL",
+        "ADI"
+      ],
+      "indicators": {
+        "sma": true,
+        "ema": false,
+        "rsi": true,
+        "bollinger": false,
+        "macd": true,
+        "vwap": false
+      }
+    },
+    "dividend_arist": {
+      "label": "Dividend Aristocrats",
+      "desc": "Long-history dividend growers across sectors.",
+      "tickers": [
+        "JNJ",
+        "MMM",
+        "KO",
+        "PG",
+        "XOM",
+        "CVX",
+        "ABT",
+        "MCD"
+      ],
+      "indicators": {
+        "sma": true,
+        "ema": false,
+        "rsi": true,
+        "bollinger": false,
+        "macd": true,
+        "vwap": false
+      }
     }
   }
 }
