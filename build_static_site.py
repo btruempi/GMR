@@ -217,6 +217,10 @@ tr.row-open td.caret{color:var(--accent)}
 .kg-crumb{font-size:13px;color:var(--muted);margin-bottom:4px}
 .kg-crumb .link{color:var(--accent);cursor:pointer}
 .kg-crumb .link:hover{text-decoration:underline}
+.kg-sources{margin-top:8px}
+.kg-sources summary{cursor:pointer;color:var(--accent);font-size:12.5px;font-weight:600}
+.kg-sources summary:hover{text-decoration:underline}
+.kg-sources code{background:var(--bg2);padding:1px 5px;border-radius:4px;font-size:11.5px}
 .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0 26px}
 @media(max-width:900px){ .stats-grid{grid-template-columns:repeat(2,1fr)} }
 @media(max-width:560px){ .stats-grid{grid-template-columns:1fr} }
@@ -2937,14 +2941,23 @@ RENDERERS.alerts = function(root){
     "<div class='card'><h3>Armed Rules</h3><div id='rules-list'></div></div>" +
     "<div class='card'>" +
       "<h3>Notification Channels</h3>" +
+      "<p class='muted small'>Pick whichever you like &mdash; you can skip email entirely. The recommended no-personal-email options are <b>ntfy</b> (free phone push, no account) and <b>Discord</b>. Configure those as repo secrets (see below); email/SMS are optional and set here.</p>" +
+      "<div class='card' style='background:var(--bg2)'>" +
+        "<h3 style='margin-top:0'>Recommended: no personal email</h3>" +
+        "<div class='grid cols-2'>" +
+          "<div><b>ntfy push (free, no signup)</b><p class='small muted' style='margin:4px 0'>Install the <b>ntfy</b> app (iOS/Android), subscribe to a private topic name of your choice (e.g. <code>gmr-" + esc(uid()) + "</code>), then add a repo secret <b>NTFY_TOPIC</b> = that topic. Alerts push straight to your phone.</p></div>" +
+          "<div><b>Discord webhook (free)</b><p class='small muted' style='margin:4px 0'>In a Discord server: Channel &rarr; Edit &rarr; Integrations &rarr; New Webhook &rarr; Copy URL. Add a repo secret <b>DISCORD_WEBHOOK</b> = that URL. Alerts post to the channel.</p></div>" +
+        "</div>" +
+      "</div>" +
+      "<div class='section-title'>Optional: email &amp; text</div>" +
       "<div class='grid cols-2'>" +
-        "<div><label>Email</label><input id='chan-email' type='email' value='" + esc((a.channels&&a.channels.email)||"") + "'></div>" +
+        "<div><label>Email (recipient)</label><input id='chan-email' type='email' value='" + esc((a.channels&&a.channels.email)||"") + "'></div>" +
         "<div><label>Phone number (10 digits)</label><input id='chan-phone' type='text' value='" + esc((a.channels&&a.channels.sms&&a.channels.sms.number)||"") + "'></div>" +
         "<div><label>Carrier (SMS via email gateway)</label><select id='chan-carrier'>" +
           Object.keys(SMS_CARRIERS).map(function(k){ return "<option value='" + k + "'" + ((a.channels&&a.channels.sms&&a.channels.sms.carrier)===k?" selected":"") + ">" + SMS_CARRIERS[k] + "</option>"; }).join("") +
         "</select></div>" +
       "</div>" +
-      "<p class='footer-note'>Email-to-SMS gateways are unreliable and carriers can silently drop messages -- treat SMS as best-effort. For guaranteed delivery, a paid provider like Twilio is a natural upgrade path (not implemented here to keep this a $0/month tool).</p>" +
+      "<p class='footer-note'>Email needs a Gmail App Password secret (GMAIL_APP_PASSWORD; set GMAIL_USER to send from a dedicated Gmail to any address). Email-to-SMS gateways are carrier-dependent and can silently drop messages -- best-effort only; ntfy/Discord are more reliable and free.</p>" +
       "<div class='cta-row'><button class='btn secondary' id='chan-save'>Save channels</button><span id='chan-saved' class='footer-note'></span></div>" +
     "</div>" +
     "<div class='card'>" +
@@ -3102,11 +3115,14 @@ function diagnoseSetup(){
     {label:"Send script present", path:"/repos/" + repo + "/contents/scripts/maybe_send_email.py"},
     {label:"alerts.json present", path:"/repos/" + repo + "/contents/data/alerts.json"},
     {label:"watchlists.json present", path:"/repos/" + repo + "/contents/data/watchlists.json"},
-    {label:"GMAIL_APP_PASSWORD secret set", path:"/repos/" + repo + "/actions/secrets/GMAIL_APP_PASSWORD"},
+    {label:"NTFY_TOPIC secret (free push)", path:"/repos/" + repo + "/actions/secrets/NTFY_TOPIC", optional:true},
+    {label:"DISCORD_WEBHOOK secret", path:"/repos/" + repo + "/actions/secrets/DISCORD_WEBHOOK", optional:true},
+    {label:"GMAIL_APP_PASSWORD secret", path:"/repos/" + repo + "/actions/secrets/GMAIL_APP_PASSWORD", optional:true},
     {label:"Last workflow run status", path:"/repos/" + repo + "/actions/workflows/nri-email.yml/runs?per_page=1"}
   ];
-  Promise.all(checks.map(function(c){ return ghGet(c.path).then(function(r){ return {label:c.label, ok:r.ok, json:r.json}; }); }))
+  Promise.all(checks.map(function(c){ return ghGet(c.path).then(function(r){ return {label:c.label, ok:r.ok, json:r.json, optional:c.optional}; }); }))
     .then(function(results){
+      var anyChannel = false;
       var rows = results.map(function(r){
         var detail = "";
         if (r.label === "Last workflow run status"){
@@ -3114,14 +3130,14 @@ function diagnoseSetup(){
           detail = run ? (run.status + "/" + (run.conclusion||"pending")) : "no runs yet";
           r.ok = !!run;
         }
-        return "<tr><td>" + esc(r.label) + "</td><td class='" + (r.ok?"diag-ok":"diag-bad") + "'>" + (r.ok?"OK":"MISSING") + (detail?" (" + esc(detail) + ")":"") + "</td></tr>";
+        if (r.optional && r.ok) anyChannel = true;
+        var cls = r.ok ? "diag-ok" : (r.optional ? "muted" : "diag-bad");
+        var txt = r.ok ? "OK" : (r.optional ? "not set" : "MISSING");
+        return "<tr><td>" + esc(r.label) + "</td><td class='" + cls + "'>" + txt + (detail?" (" + esc(detail) + ")":"") + "</td></tr>";
       });
-      var emailOk = !!(STATE.alerts.channels && STATE.alerts.channels.email);
-      rows.push("<tr><td>Email address configured</td><td class='" + (emailOk?"diag-ok":"diag-bad") + "'>" + (emailOk?"OK":"MISSING") + "</td></tr>");
-      var sms = STATE.alerts.channels && STATE.alerts.channels.sms;
-      var smsOk = !!(sms && sms.number && sms.carrier);
-      rows.push("<tr><td>SMS gateway resolved</td><td class='" + (smsOk?"diag-ok":"diag-bad") + "'>" + (smsOk?"OK":"not configured (optional)") + "</td></tr>");
-      root.innerHTML = "<table class='status-table'><tbody>" + rows.join("") + "</tbody></table>";
+      rows.push("<tr><td><b>At least one delivery channel set</b></td><td class='" + (anyChannel?"diag-ok":"diag-bad") + "'>" + (anyChannel?"OK":"ADD ntfy / Discord / Gmail secret") + "</td></tr>");
+      root.innerHTML = "<table class='status-table'><tbody>" + rows.join("") + "</tbody></table>" +
+        "<p class='footer-note'>You only need ONE channel. ntfy (NTFY_TOPIC) is the easiest &mdash; free push, no personal email.</p>";
     })
     .catch(function(e){
       console.error("GMR: diagnose failed", e);
@@ -3544,7 +3560,14 @@ RENDERERS.moneyflow = function(root){
     "<div class='card'>" +
       "<div class='flex-between'><div><h2>Money Flow &mdash; Financial Knowledge Graph</h2>" +
         "<p class='muted small'><b>Relationships</b>: a web of how companies connect &mdash; who supplies whom (vertical / supply-chain), who competes (horizontal), B2B customers, licensing, partnerships, and M&amp;A &mdash; click any node to traverse it. " +
-        "<b>Company spend</b> &amp; <b>Aggregate</b>: where money goes, from one SEC filing up to a whole vertical or the entire market.</p></div></div>" +
+        "<b>Company spend</b> &amp; <b>Aggregate</b>: where money goes, from one SEC filing up to a whole vertical or the entire market.</p>" +
+        "<details class='kg-sources'><summary>Sources &amp; methodology</summary>" +
+          "<ul class='small muted' style='margin:6px 0 0;padding-left:18px;line-height:1.6'>" +
+            "<li><b>Revenue &amp; spending (Company spend / Aggregate):</b> U.S. SEC EDGAR <b>XBRL company-facts API</b> (data.sec.gov) &mdash; the exact figures companies report in their latest annual 10-K / 20-F / 40-F filings. Latest fiscal-year value per concept.</li>" +
+            "<li><b>Relationships (supply-chain / competitor / customer / licensing / partner / M&amp;A):</b> hand-curated from SEC filings (10-K customer &amp; segment disclosures), company investor presentations &amp; press releases, and reputable public reporting; date-stamped as of " + esc((STATE.relationships.updated)||"the build") + ". Illustrative, not exhaustive, not investment advice.</li>" +
+            "<li><b>Money-flow status on nodes (accumulating / distributing):</b> Chaikin Money Flow (CMF-21) computed in-app from price &amp; volume.</li>" +
+            "<li><b>Prices, market cap, sector/industry:</b> Yahoo Finance (quotes &amp; fundamentals) with Stooq fallback; refreshed on a schedule via GitHub Actions.</li>" +
+          "</ul></details></div></div>" +
       "<div class='row'>" +
         "<div class='seg' id='kg-mode'>" +
           "<button data-kg='relationships'" + (mode==="relationships"?" class='on'":"") + ">Relationships</button>" +

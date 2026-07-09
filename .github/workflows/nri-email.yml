@@ -28,10 +28,11 @@ jobs:
 
       - name: Evaluate alerts / send digest
         env:
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          # Optional: the Gmail address that owns the app password (the sender).
-          # If unset, alerts are sent to/from the email you configure on the site.
-          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          # Pick ANY of these -- ntfy needs no personal email at all.
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}         # free phone push (ntfy.sh), no account
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }} # free Discord channel webhook
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}  # email/SMS-gateway path
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}         # optional: sender Gmail (send to any recipient)
           NRI_TEST_MODE: ${{ inputs.test && '1' || '0' }}
           NRI_TRIGGER_CRON: ${{ github.event.schedule }}
         run: python3 scripts/maybe_send_email.py

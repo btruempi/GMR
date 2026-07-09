@@ -250,14 +250,64 @@ def sms_gateway_address(channels):
     return None
 
 
-def run_test_alert(channels):
+def send_ntfy(title, body):
+    """Free push notification via ntfy.sh -- no account, no personal email.
+    Set repo secret NTFY_TOPIC to a hard-to-guess topic (or a full URL); install
+    the ntfy app and subscribe to that topic to get push alerts on your phone."""
+    topic = (os.environ.get("NTFY_TOPIC") or "").strip()
+    if not topic:
+        return False
+    url = topic if topic.startswith("http") else ("https://ntfy.sh/" + topic)
+    try:
+        req = urllib.request.Request(
+            url, data=body.encode("utf-8"),
+            headers={"Title": title.encode("ascii", "ignore").decode(), "Tags": "chart_with_upwards_trend"})
+        urllib.request.urlopen(req, timeout=15)
+        print(f"[GMR] Sent ntfy push -> {url}")
+        return True
+    except Exception as e:
+        print(f"[GMR] ntfy push failed: {e}")
+        return False
+
+
+def send_discord(title, body):
+    """Free alert into a Discord channel via an incoming webhook URL (repo secret
+    DISCORD_WEBHOOK). No personal email involved."""
+    webhook = (os.environ.get("DISCORD_WEBHOOK") or "").strip()
+    if not webhook:
+        return False
+    payload = json.dumps({"content": f"**{title}**\n{body}"[:1900]}).encode("utf-8")
+    try:
+        req = urllib.request.Request(webhook, data=payload, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=15)
+        print("[GMR] Sent Discord message")
+        return True
+    except Exception as e:
+        print(f"[GMR] Discord send failed: {e}")
+        return False
+
+
+def notify(channels, subject, body):
+    """Deliver an alert over every configured channel. ntfy + Discord need no
+    personal email; email/SMS are optional."""
+    sent = False
     to_addr = channels.get("email")
-    cc = [sms_gateway_address(channels)]
-    send_email(
-        to_addr, cc,
+    if to_addr:
+        sent = send_email(to_addr, [sms_gateway_address(channels)], subject, body) or sent
+    sent = send_ntfy(subject, body) or sent
+    sent = send_discord(subject, body) or sent
+    if not sent:
+        print(f"[GMR] No channel delivered '{subject}'. Configure NTFY_TOPIC (free push), "
+              f"DISCORD_WEBHOOK, or GMAIL_APP_PASSWORD.")
+    return sent
+
+
+def run_test_alert(channels):
+    notify(
+        channels,
         "GMR test alert -- your pipeline works",
         "This is a synthetic test alert from Growth Markets Research. "
-        "If you got this, your workflow, secret, and email settings are wired up correctly.",
+        "If you got this, your workflow and notification channels are wired up correctly.",
     )
 
 
@@ -297,7 +347,7 @@ def run_alert_check():
 
     lines = [f"- {r['ticker']}: {r['type']} ({detail})" for r, detail in fired]
     body = "Growth Markets Research -- alerts triggered:\n\n" + "\n".join(lines)
-    send_email(channels.get("email"), [sms_gateway_address(channels)], f"GMR: {len(fired)} alert(s) triggered", body)
+    notify(channels, f"GMR: {len(fired)} alert(s) triggered", body)
 
 
 CADENCE_DAYS = {"weekly": 0, "monthly": 1, "quarterly": 1, "yearly": 1}  # Monday=0 for weekly
@@ -337,8 +387,10 @@ def run_digest():
 
     body = f"Growth Markets Research -- {cadence} digest\n\n" + "\n".join(lines)
     alerts = load_json("data/alerts.json", {"channels": {}})
-    channels = alerts.get("channels", {})
-    send_email(settings.get("email") or channels.get("email"), [], f"GMR {cadence} digest", body)
+    channels = dict(alerts.get("channels", {}))
+    if settings.get("email"):
+        channels["email"] = settings["email"]
+    notify(channels, f"GMR {cadence} digest", body)
 
 
 def main():
