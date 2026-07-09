@@ -3,7 +3,8 @@ name: GMR alerts + email digest
 on:
   schedule:
     # Alert rule check -- every 15 minutes during US market hours (13:00-20:59 UTC, Mon-Fri)
-    - cron: "*/15 13-20 * * 1-5"
+    # every 15 min across US market hours in both DST regimes (13:30-21:00 UTC)
+    - cron: "*/15 13-21 * * 1-5"
     # Daily digest gate -- script decides whether today matches the configured cadence
     - cron: "0 8 * * *"
   workflow_dispatch:
