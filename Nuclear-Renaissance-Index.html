@@ -2949,6 +2949,20 @@ function requireGithubConnection(){
   return true;
 }
 
+// Turn a failed GitHub API result into a specific, actionable message.
+function ghErrorText(results){
+  var fail = results.filter(function(r){ return !r.ok; })[0];
+  if (!fail) return "";
+  var msg = (fail.json && fail.json.message) || "";
+  var s = fail.status;
+  if (s === 401) return "401 Bad credentials -- the token is wrong or expired. Generate a new one.";
+  if (s === 403) return "403 Forbidden -- the token lacks permission. Use a CLASSIC token with the 'repo' and 'workflow' scopes checked (fine-grained tokens need Contents: read/write AND Workflows: read/write on THIS repo). (" + esc(msg) + ")";
+  if (s === 404) return "404 Not Found -- check the repo name is exactly 'owner/repo' (yours is '" + esc(ghRepoPath()) + "'), it exists, and the token can see it.";
+  if (s === 409) return "409 Conflict -- the file changed on GitHub since load. Reload the page and try again.";
+  if (s === 422) return "422 -- " + esc(msg) + " (often a branch/sha issue; make sure the repo has a 'main' branch).";
+  return (s || "error") + " -- " + esc(msg || "unknown");
+}
+
 function armAlerts(){
   if (!requireGithubConnection()) return;
   var status = $("#arm-status");
@@ -2958,7 +2972,12 @@ function armAlerts(){
     ghPutFile("data/watchlists.json", STATE.watchlists, "GMR: update watchlists.json via Alerts tab")
   ]).then(function(results){
     var allOk = results.every(function(r){ return r.ok; });
-    status.textContent = allOk ? "Armed! Your rules will run on the next scheduled workflow tick." : "Something failed -- check the token scopes (needs repo + workflow) and repo name.";
+    if (allOk){ status.textContent = "Armed! Your rules will run on the next scheduled workflow tick."; }
+    else {
+      var err = ghErrorText(results);
+      console.error("GMR: arm alerts failed", results);
+      status.innerHTML = "<span class='down'>Failed &mdash; " + err + "</span>";
+    }
   }).catch(function(e){
     console.error("GMR: arm alerts failed", e);
     status.textContent = "Push failed -- see console for details.";
@@ -3174,9 +3193,11 @@ function renderEmailDigestCard(){
       ghPutFile("data/email_settings.json", STATE.emailSettings, "GMR: update email settings")
     ]).then(function(results){
       var allOk = results.every(function(r){ return r.ok; });
-      status.textContent = allOk
-        ? "Scheduled emails are on. Add the GMAIL_APP_PASSWORD secret in your repo settings, then use Alerts → Send a test alert."
-        : "Something failed -- check the token has repo + workflow scopes and the repo name is correct.";
+      if (allOk){ status.textContent = "Scheduled emails are on. Add a delivery secret (NTFY_TOPIC / DISCORD_WEBHOOK / GMAIL_APP_PASSWORD) in repo settings, then use Alerts -> Send a test alert."; }
+      else {
+        console.error("GMR: turn on scheduled emails failed", results);
+        status.innerHTML = "<span class='down'>Failed &mdash; " + ghErrorText(results) + "</span>";
+      }
     }).catch(function(e){
       console.error("GMR: turn on scheduled emails failed", e);
       status.textContent = "Push failed -- see console for details.";
