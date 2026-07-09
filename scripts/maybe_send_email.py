@@ -264,7 +264,9 @@ def send_ntfy(title, body):
     if not topic:
         return False
     url = topic if topic.startswith("http") else ("https://ntfy.sh/" + topic)
-    base = {"Title": title.encode("ascii", "ignore").decode(), "Tags": "chart_with_upwards_trend"}
+    base = {"Title": title.encode("ascii", "ignore").decode(),
+            "Tags": "chart_with_upwards_trend",
+            "Priority": "high"}  # pop prominently instead of a quiet notification
     token = (os.environ.get("NTFY_TOKEN") or "").strip()
     if token:
         base["Authorization"] = "Bearer " + token
