@@ -371,6 +371,14 @@ function lsGet(key, fallback){
 function lsSet(key, val){
   try{ localStorage.setItem(LS_PREFIX + key, JSON.stringify(val)); }catch(e){ /* quota or private mode */ }
 }
+// Session storage -- for sensitive values (the GitHub token). Cleared when the
+// browser tab closes, so it is not left behind on a shared computer.
+function ssGet(key, fallback){
+  try{ var raw = sessionStorage.getItem(LS_PREFIX + key); return raw == null ? fallback : JSON.parse(raw); }catch(e){ return fallback; }
+}
+function ssSet(key, val){
+  try{ sessionStorage.setItem(LS_PREFIX + key, JSON.stringify(val)); }catch(e){}
+}
 
 // ---- global app state ---------------------------------------------------
 var SEED = window.GMR_DATA || {};
@@ -385,7 +393,7 @@ var STATE = {
   catalysts: SEED.catalysts || [],
   preIpo: SEED.preIpo || [],
   seriesCache: {},
-  githubToken: lsGet("githubToken", ""),
+  githubToken: ssGet("githubToken", ""),
   githubRepo: lsGet("githubRepo", ""),
   deployFiles: window.GMR_DEPLOY_FILES || {},
   relationships: SEED.relationships || {types:{}, edges:[]}
@@ -2712,12 +2720,30 @@ RENDERERS.profile = function(root){
       "<div class='row'><input id='nl-input' type='text' placeholder='e.g. build me a watchlist for cybersecurity' style='flex:1;min-width:260px'><button class='btn' id='nl-run'>Run</button></div>" +
       "<div id='nl-output' class='footer-note'></div>" +
     "</div>" +
-    "<div id='pf-form-wrap'></div>";
+    "<div id='pf-form-wrap'></div>" +
+    "<div class='card'>" +
+      "<h3>Privacy &amp; your data</h3>" +
+      "<p class='muted small'>Everything you enter (watchlists, profile, email/phone, GitHub connection) is stored <b>only in this browser</b> &mdash; nothing is sent to any server we run, and it is never shared with other visitors (each browser is separate). Your <b>GitHub token is kept in session storage</b> and is cleared automatically when you close this tab, so it is not left behind. On a <b>shared computer</b>, click below to wipe everything now.</p>" +
+      "<div class='cta-row'><button class='btn secondary' id='pf-clear-data'>Clear all my data from this browser</button><span id='pf-clear-msg' class='footer-note'></span></div>" +
+    "</div>";
 
   $("#nl-run").addEventListener("click", runNLCommand);
   $("#nl-input").addEventListener("keydown", function(e){ if (e.key==="Enter") runNLCommand(); });
+  $("#pf-clear-data").addEventListener("click", function(){
+    if (!confirm("Wipe all Growth Markets Research data (watchlists, indexes, profile, email/phone, GitHub token) from THIS browser? This cannot be undone.")) return;
+    clearAllData();
+    $("#pf-clear-msg").textContent = "Cleared. Reloading...";
+    setTimeout(function(){ location.reload(); }, 600);
+  });
   renderProfileForm();
 };
+
+function clearAllData(){
+  try{
+    Object.keys(localStorage).forEach(function(k){ if (k.indexOf(LS_PREFIX)===0) localStorage.removeItem(k); });
+    Object.keys(sessionStorage).forEach(function(k){ if (k.indexOf(LS_PREFIX)===0) sessionStorage.removeItem(k); });
+  }catch(e){}
+}
 
 function renderProfileForm(){
   var root = $("#pf-form-wrap");
@@ -2860,14 +2886,26 @@ function ghPutFile(filePath, contentObjOrText, message){
   var apiPath = "/repos/" + repo + "/contents/" + filePath;
   var text = (typeof contentObjOrText === "string") ? contentObjOrText : JSON.stringify(contentObjOrText, null, 2);
   var b64 = btoa(unescape(encodeURIComponent(text)));
-  return ghGet(apiPath).then(function(existing){
-    var sha = (existing.ok && existing.json && existing.json.sha) ? existing.json.sha : undefined;
-    var body = { message: message, content: b64 };
-    if (sha) body.sha = sha;
-    return fetch("https://api.github.com" + apiPath, {
-      method: "PUT", headers: Object.assign({"Content-Type":"application/json"}, ghHeaders()), body: JSON.stringify(body)
-    }).then(function(res){ return res.json().then(function(json){ return {ok:res.ok, status:res.status, json:json}; }); });
-  });
+  // Fetch the current sha then PUT; if GitHub reports a 409/422 conflict (the
+  // file moved since we read it -- the refresh workflows commit frequently),
+  // re-read the latest sha and retry.
+  function attempt(triesLeft){
+    return ghGet(apiPath).then(function(existing){
+      var sha = (existing.ok && existing.json && existing.json.sha) ? existing.json.sha : undefined;
+      var body = { message: message, content: b64 };
+      if (sha) body.sha = sha;
+      return fetch("https://api.github.com" + apiPath, {
+        method: "PUT", headers: Object.assign({"Content-Type":"application/json"}, ghHeaders()), body: JSON.stringify(body)
+      }).then(function(res){ return res.json().then(function(json){ return {ok:res.ok, status:res.status, json:json}; }); })
+        .then(function(r){
+          if (!r.ok && (r.status===409 || r.status===422) && triesLeft>0){
+            return new Promise(function(res){ setTimeout(res, 400); }).then(function(){ return attempt(triesLeft-1); });
+          }
+          return r;
+        });
+    });
+  }
+  return attempt(3);
 }
 function ghDispatchWorkflow(workflowFile, inputs){
   var repo = ghRepoPath();
@@ -2952,7 +2990,7 @@ RENDERERS.alerts = function(root){
       "<div class='section-title'>Optional: email &amp; text</div>" +
       "<div class='grid cols-2'>" +
         "<div><label>Email (recipient)</label><input id='chan-email' type='email' value='" + esc((a.channels&&a.channels.email)||"") + "'></div>" +
-        "<div><label>Phone number (10 digits)</label><input id='chan-phone' type='text' value='" + esc((a.channels&&a.channels.sms&&a.channels.sms.number)||"") + "'></div>" +
+        "<div><label>Phone number (10 digits)</label><input id='chan-phone' type='password' autocomplete='off' value='" + esc((a.channels&&a.channels.sms&&a.channels.sms.number)||"") + "'></div>" +
         "<div><label>Carrier (SMS via email gateway)</label><select id='chan-carrier'>" +
           Object.keys(SMS_CARRIERS).map(function(k){ return "<option value='" + k + "'" + ((a.channels&&a.channels.sms&&a.channels.sms.carrier)===k?" selected":"") + ">" + SMS_CARRIERS[k] + "</option>"; }).join("") +
         "</select></div>" +
@@ -2963,10 +3001,11 @@ RENDERERS.alerts = function(root){
     "<div class='card'>" +
       "<h3>Connect GitHub</h3>" +
       "<p class='muted small'>Needed to push alerts.json / watchlists.json and to dispatch the test workflow. Create a token at " +
-        "<a href='https://github.com/settings/tokens/new?scopes=repo,workflow&description=GMR' target='_blank' rel='noopener'>github.com/settings/tokens/new</a> with <b>repo</b> and <b>workflow</b> scopes.</p>" +
+        "<a href='https://github.com/settings/tokens/new?scopes=repo,workflow&description=GMR' target='_blank' rel='noopener'>github.com/settings/tokens/new</a> with <b>repo</b> and <b>workflow</b> scopes. " +
+        "Your token is stored in this browser&#39;s session only and is cleared when you close the tab.</p>" +
       "<div class='grid cols-2'>" +
         "<div><label>owner/repo</label><input id='gh-repo' type='text' placeholder='yourname/GMR' value='" + esc(STATE.githubRepo||"") + "'></div>" +
-        "<div><label>Personal Access Token</label><input id='gh-token' type='text' placeholder='ghp_...' value='" + esc(STATE.githubToken||"") + "'></div>" +
+        "<div><label>Personal Access Token</label><input id='gh-token' type='password' autocomplete='off' placeholder='ghp_...' value='" + esc(STATE.githubToken||"") + "'></div>" +
       "</div>" +
       "<div class='cta-row'><button class='btn secondary' id='gh-save'>Save connection</button><button class='btn' id='arm-btn'>Arm my alerts</button><span id='arm-status' class='footer-note'></span></div>" +
     "</div>" +
@@ -2996,7 +3035,7 @@ RENDERERS.alerts = function(root){
     STATE.githubRepo = $("#gh-repo").value.trim();
     STATE.githubToken = $("#gh-token").value.trim();
     lsSet("githubRepo", STATE.githubRepo);
-    lsSet("githubToken", STATE.githubToken);
+    ssSet("githubToken", STATE.githubToken);
     $("#arm-status").textContent = "Connection saved.";
   });
   $("#arm-btn").addEventListener("click", armAlerts);
@@ -3285,7 +3324,7 @@ function renderEmailDigestCard(){
       "<div><label>owner/repo</label><input id='meth-repo' type='text' placeholder='yourname/GMR' value='" + esc(STATE.githubRepo||"") + "'></div>" +
     "</div>" +
     "<div class='grid cols-2'>" +
-      "<div><label>GitHub Personal Access Token (repo + workflow scopes)</label><input id='meth-token' type='text' placeholder='ghp_...' value='" + esc(STATE.githubToken||"") + "'></div>" +
+      "<div><label>GitHub Personal Access Token (repo + workflow scopes)</label><input id='meth-token' type='password' autocomplete='off' placeholder='ghp_...' value='" + esc(STATE.githubToken||"") + "'></div>" +
     "</div>" +
     "<div class='cta-row'><button class='btn' id='meth-turn-on'>Turn on scheduled emails</button><span id='meth-status' class='footer-note'></span></div>";
 
@@ -3304,7 +3343,7 @@ function renderEmailDigestCard(){
     STATE.githubRepo = $("#meth-repo").value.trim();
     STATE.githubToken = $("#meth-token").value.trim();
     lsSet("githubRepo", STATE.githubRepo);
-    lsSet("githubToken", STATE.githubToken);
+    ssSet("githubToken", STATE.githubToken);
 
     if (!STATE.githubRepo || !STATE.githubToken){
       $("#meth-status").textContent = "Enter owner/repo and a token first.";
