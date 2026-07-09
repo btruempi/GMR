@@ -3015,6 +3015,7 @@ RENDERERS.alerts = function(root){
         "<button class='btn' id='test-alert-btn'>Send me a test alert NOW</button>" +
         "<button class='btn secondary' id='diagnose-btn'>Diagnose setup</button>" +
       "</div>" +
+      "<div id='test-status' class='footer-note' style='margin-top:8px'></div>" +
       "<div id='diagnose-output' style='margin-top:12px'></div>" +
     "</div>";
 
@@ -3151,15 +3152,46 @@ function armAlerts(){
 function sendTestAlert(){
   if (!requireGithubConnection()) return;
   var btn = $("#test-alert-btn");
+  var status = $("#test-status");
+  var repo = ghRepoPath();
+  var runsUrl = "https://github.com/" + repo + "/actions/workflows/nri-email.yml";
   btn.disabled = true; btn.textContent = "Sending...";
+  status.innerHTML = "Dispatching test alert...";
+  var startedAt = Date.now();
   ghDispatchWorkflow("nri-email.yml", { test: "true" }).then(function(res){
-    btn.disabled = false;
-    btn.textContent = "Send me a test alert NOW";
-    alert(res.ok ? "Test alert dispatched. Check your inbox within about a minute." : "Dispatch failed (status " + res.status + "). Check that the workflow file is pushed (Methodology tab) and your token has the workflow scope.");
+    if (!res.ok){
+      btn.disabled = false; btn.textContent = "Send me a test alert NOW";
+      status.innerHTML = "<span class='down'>Dispatch failed (" + res.status + "). Make sure the workflow file is pushed (Methodology tab) and your token has the <b>workflow</b> scope.</span>";
+      return;
+    }
+    status.innerHTML = "Dispatched. Waiting for the run to finish (~30-60s)...";
+    // poll the latest run for this workflow
+    var tries = 0;
+    (function poll(){
+      tries++;
+      ghGet("/repos/" + repo + "/actions/workflows/nri-email.yml/runs?per_page=1").then(function(r){
+        var run = r.json && r.json.workflow_runs && r.json.workflow_runs[0];
+        var fresh = run && (new Date(run.created_at).getTime() > startedAt - 20000);
+        if (fresh && run.status === "completed"){
+          btn.disabled = false; btn.textContent = "Send me a test alert NOW";
+          if (run.conclusion === "success"){
+            status.innerHTML = "<span class='up'>Run succeeded.</span> If nothing arrived, no delivery channel is set &mdash; add an <b>NTFY_TOPIC</b> (free push), <b>DISCORD_WEBHOOK</b>, or <b>GMAIL_APP_PASSWORD</b> secret, then retry. <a href='" + run.html_url + "' target='_blank' rel='noopener'>View run log</a> (it prints exactly what was sent or why not).";
+          } else {
+            status.innerHTML = "<span class='down'>Run " + esc(run.conclusion||"failed") + ".</span> <a href='" + run.html_url + "' target='_blank' rel='noopener'>Open the run log</a> to see the error.";
+          }
+          return;
+        }
+        if (tries < 20){ setTimeout(poll, 5000); }
+        else {
+          btn.disabled = false; btn.textContent = "Send me a test alert NOW";
+          status.innerHTML = "Still running. <a href='" + runsUrl + "' target='_blank' rel='noopener'>Check the Actions tab</a> for the result &amp; log.";
+        }
+      }).catch(function(){ if (tries < 20) setTimeout(poll, 5000); });
+    })();
   }).catch(function(e){
     btn.disabled = false; btn.textContent = "Send me a test alert NOW";
     console.error("GMR: test dispatch failed", e);
-    alert("Dispatch failed -- see console for details.");
+    status.innerHTML = "<span class='down'>Dispatch failed -- see console.</span>";
   });
 }
 
