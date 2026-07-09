@@ -8,34 +8,6 @@
   },
   "rules": [
     {
-      "id": "5hxixolx",
-      "type": "pct_change",
-      "ticker": "RYCEY",
-      "params": {
-        "days": 1,
-        "pct": 1
-      },
-      "enabled": true
-    },
-    {
-      "id": "9jyu2ww0",
-      "type": "price_above",
-      "ticker": "TSLA",
-      "params": {
-        "price": 400
-      },
-      "enabled": true
-    },
-    {
-      "id": "cr955ee0",
-      "type": "price_below",
-      "ticker": "TSLA",
-      "params": {
-        "price": 390
-      },
-      "enabled": true
-    },
-    {
       "id": "rd3s2zif",
       "type": "volume_spike",
       "ticker": "ATAI",
@@ -108,11 +80,38 @@
       "enabled": true
     },
     {
-      "id": "jhief921",
+      "id": "tjprt8rz",
       "type": "price_above",
-      "ticker": "SMR",
+      "ticker": "RYCEY",
       "params": {
-        "price": 9
+        "price": 19.4
+      },
+      "enabled": true
+    },
+    {
+      "id": "2uoqm1bz",
+      "type": "price_below",
+      "ticker": "RYCEY",
+      "params": {
+        "price": 19.25
+      },
+      "enabled": true
+    },
+    {
+      "id": "s6l8k1g5",
+      "type": "price_below",
+      "ticker": "TSLA",
+      "params": {
+        "price": 403
+      },
+      "enabled": true
+    },
+    {
+      "id": "wbmb16m0",
+      "type": "price_above",
+      "ticker": "TSLA",
+      "params": {
+        "price": 405
       },
       "enabled": true
     }
