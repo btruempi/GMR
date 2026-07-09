@@ -30,6 +30,8 @@ jobs:
         env:
           # Pick ANY of these -- ntfy needs no personal email at all.
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}         # free phone push (ntfy.sh), no account
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}         # free ntfy.sh account token -- enables email forwarding
+          NTFY_EMAIL: ${{ secrets.NTFY_EMAIL }}         # optional: ntfy forwards each alert to these emails (free, no Gmail); comma-separated
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }} # free Discord channel webhook
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}  # email/SMS-gateway path
           GMAIL_USER: ${{ secrets.GMAIL_USER }}         # optional: sender Gmail (send to any recipient)

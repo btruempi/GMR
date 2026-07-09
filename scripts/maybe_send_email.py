@@ -253,21 +253,48 @@ def sms_gateway_address(channels):
 def send_ntfy(title, body):
     """Free push notification via ntfy.sh -- no account, no personal email.
     Set repo secret NTFY_TOPIC to a hard-to-guess topic (or a full URL); install
-    the ntfy app and subscribe to that topic to get push alerts on your phone."""
+    the ntfy app and subscribe to that topic to get push alerts on your phone.
+
+    Optional: set NTFY_EMAIL (repo secret) to also have ntfy.sh FORWARD each
+    alert to email addresses -- comma-separated. This gives you free email
+    copies with no Gmail setup at all. You can even list a carrier email-to-SMS
+    gateway (e.g. 5551234567@vtext.com) to attempt a free text, though carrier
+    gateways are unreliable."""
     topic = (os.environ.get("NTFY_TOPIC") or "").strip()
     if not topic:
         return False
     url = topic if topic.startswith("http") else ("https://ntfy.sh/" + topic)
+    base = {"Title": title.encode("ascii", "ignore").decode(), "Tags": "chart_with_upwards_trend"}
+    token = (os.environ.get("NTFY_TOKEN") or "").strip()
+    if token:
+        base["Authorization"] = "Bearer " + token
+    sent = False
+    # 1) plain push -- works anonymously, so this always fires regardless of the
+    #    email config below.
     try:
-        req = urllib.request.Request(
-            url, data=body.encode("utf-8"),
-            headers={"Title": title.encode("ascii", "ignore").decode(), "Tags": "chart_with_upwards_trend"})
-        urllib.request.urlopen(req, timeout=15)
+        urllib.request.urlopen(
+            urllib.request.Request(url, data=body.encode("utf-8"), headers=dict(base)), timeout=15)
         print(f"[GMR] Sent ntfy push -> {url}")
-        return True
+        sent = True
     except Exception as e:
         print(f"[GMR] ntfy push failed: {e}")
-        return False
+    # 2) optional email forwarding -- ntfy.sh requires a (free) account token to
+    #    send email, so we only attempt it when NTFY_TOKEN is set.
+    fwd = (os.environ.get("NTFY_EMAIL") or "").strip()
+    if fwd and not token:
+        print("[GMR] NTFY_EMAIL is set but NTFY_TOKEN is missing -- ntfy.sh needs a "
+              "free account access token to send email. Skipping email (push still sent).")
+    elif fwd and token:
+        for target in [e.strip() for e in fwd.split(",") if e.strip()]:
+            try:
+                h = dict(base); h["Email"] = target
+                urllib.request.urlopen(
+                    urllib.request.Request(url, data=body.encode("utf-8"), headers=h), timeout=15)
+                print(f"[GMR] Sent ntfy email -> {target}")
+                sent = True
+            except Exception as e:
+                print(f"[GMR] ntfy email to {target} failed: {e}")
+    return sent
 
 
 def send_discord(title, body):

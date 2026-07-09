@@ -2983,7 +2983,7 @@ RENDERERS.alerts = function(root){
       "<div class='card' style='background:var(--bg2)'>" +
         "<h3 style='margin-top:0'>Recommended: no personal email</h3>" +
         "<div class='grid cols-2'>" +
-          "<div><b>ntfy push (free, no signup)</b><p class='small muted' style='margin:4px 0'>Install the <b>ntfy</b> app (iOS/Android), subscribe to a private topic name of your choice (e.g. <code>gmr-" + esc(uid()) + "</code>), then add a repo secret <b>NTFY_TOPIC</b> = that topic. Alerts push straight to your phone.</p></div>" +
+          "<div><b>ntfy push (free, no signup)</b><p class='small muted' style='margin:4px 0'>Install the <b>ntfy</b> app, subscribe to a private topic, add a repo secret <b>NTFY_TOPIC</b> = that topic. Pushes hit your lock screen &mdash; no need to open the app (enable notifications + Android &#39;instant delivery&#39;).<br><b>Want email too?</b> Make a free ntfy.sh account &rarr; generate an access token &rarr; add secrets <b>NTFY_TOKEN</b> = token and <b>NTFY_EMAIL</b> = your email(s, comma-separated). ntfy forwards each alert to your inbox &mdash; no Gmail needed.</p></div>" +
           "<div><b>Discord webhook (free)</b><p class='small muted' style='margin:4px 0'>In a Discord server: Channel &rarr; Edit &rarr; Integrations &rarr; New Webhook &rarr; Copy URL. Add a repo secret <b>DISCORD_WEBHOOK</b> = that URL. Alerts post to the channel.</p></div>" +
         "</div>" +
       "</div>" +
