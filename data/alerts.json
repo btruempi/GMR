@@ -106,6 +106,15 @@
         "multiplier": 2
       },
       "enabled": true
+    },
+    {
+      "id": "jhief921",
+      "type": "price_above",
+      "ticker": "SMR",
+      "params": {
+        "price": 9
+      },
+      "enabled": true
     }
   ]
 }
