@@ -3013,9 +3013,11 @@ RENDERERS.alerts = function(root){
     "<div class='card'>" +
       "<h3>Verify Notifications Work</h3>" +
       "<div class='cta-row'>" +
-        "<button class='btn' id='test-alert-btn'>Send me a test alert NOW</button>" +
+        "<button class='btn' id='test-alert-btn'>Send test alert NOW</button>" +
+        "<button class='btn secondary' id='check-now-btn'>Run my rules now</button>" +
         "<button class='btn secondary' id='diagnose-btn'>Diagnose setup</button>" +
       "</div>" +
+      "<p class='footer-note' style='margin:6px 0 0'><b>Send test alert</b> = a synthetic message to prove delivery. <b>Run my rules now</b> = evaluate your actual armed rules immediately (same as a scheduled run) &mdash; fires any that newly trigger and prints each rule&#39;s result in the log. Note: the cloud only auto-checks <b>every 15 min during US market hours (Mon-Fri)</b>, and each rule fires once when it crosses into true.</p>" +
       "<div id='test-status' class='footer-note' style='margin-top:8px'></div>" +
       "<div id='diagnose-output' style='margin-top:12px'></div>" +
     "</div>";
@@ -3042,6 +3044,7 @@ RENDERERS.alerts = function(root){
   });
   $("#arm-btn").addEventListener("click", armAlerts);
   $("#test-alert-btn").addEventListener("click", sendTestAlert);
+  $("#check-now-btn").addEventListener("click", checkAlertsNow);
   $("#diagnose-btn").addEventListener("click", diagnoseSetup);
 };
 
@@ -3150,23 +3153,23 @@ function armAlerts(){
   });
 }
 
-function sendTestAlert(){
+// Dispatch nri-email.yml with the given inputs, then poll the run and report.
+function dispatchAndPoll(btn, label, inputs, successMsg){
   if (!requireGithubConnection()) return;
-  var btn = $("#test-alert-btn");
   var status = $("#test-status");
   var repo = ghRepoPath();
   var runsUrl = "https://github.com/" + repo + "/actions/workflows/nri-email.yml";
-  btn.disabled = true; btn.textContent = "Sending...";
-  status.innerHTML = "Dispatching test alert...";
+  var orig = btn.textContent;
+  btn.disabled = true; btn.textContent = "Working...";
+  status.innerHTML = "Dispatching...";
   var startedAt = Date.now();
-  ghDispatchWorkflow("nri-email.yml", { test: "true" }).then(function(res){
+  ghDispatchWorkflow("nri-email.yml", inputs).then(function(res){
     if (!res.ok){
-      btn.disabled = false; btn.textContent = "Send me a test alert NOW";
-      status.innerHTML = "<span class='down'>Dispatch failed (" + res.status + "). Make sure the workflow file is pushed (Methodology tab) and your token has the <b>workflow</b> scope.</span>";
+      btn.disabled = false; btn.textContent = orig;
+      status.innerHTML = "<span class='down'>Dispatch failed (" + res.status + "). Make sure the workflow file is pushed and your token has the <b>workflow</b> scope.</span>";
       return;
     }
-    status.innerHTML = "Dispatched. Waiting for the run to finish (~30-60s)...";
-    // poll the latest run for this workflow
+    status.innerHTML = "Dispatched. Waiting for the run (~30-60s)...";
     var tries = 0;
     (function poll(){
       tries++;
@@ -3174,26 +3177,31 @@ function sendTestAlert(){
         var run = r.json && r.json.workflow_runs && r.json.workflow_runs[0];
         var fresh = run && (new Date(run.created_at).getTime() > startedAt - 20000);
         if (fresh && run.status === "completed"){
-          btn.disabled = false; btn.textContent = "Send me a test alert NOW";
+          btn.disabled = false; btn.textContent = orig;
           if (run.conclusion === "success"){
-            status.innerHTML = "<span class='up'>Run succeeded.</span> If nothing arrived, no delivery channel is set &mdash; add an <b>NTFY_TOPIC</b> (free push), <b>DISCORD_WEBHOOK</b>, or <b>GMAIL_APP_PASSWORD</b> secret, then retry. <a href='" + run.html_url + "' target='_blank' rel='noopener'>View run log</a> (it prints exactly what was sent or why not).";
+            status.innerHTML = "<span class='up'>Run succeeded.</span> " + successMsg + " <a href='" + run.html_url + "' target='_blank' rel='noopener'>View run log</a>.";
           } else {
             status.innerHTML = "<span class='down'>Run " + esc(run.conclusion||"failed") + ".</span> <a href='" + run.html_url + "' target='_blank' rel='noopener'>Open the run log</a> to see the error.";
           }
           return;
         }
         if (tries < 20){ setTimeout(poll, 5000); }
-        else {
-          btn.disabled = false; btn.textContent = "Send me a test alert NOW";
-          status.innerHTML = "Still running. <a href='" + runsUrl + "' target='_blank' rel='noopener'>Check the Actions tab</a> for the result &amp; log.";
-        }
+        else { btn.disabled = false; btn.textContent = orig; status.innerHTML = "Still running. <a href='" + runsUrl + "' target='_blank' rel='noopener'>Check the Actions tab</a>."; }
       }).catch(function(){ if (tries < 20) setTimeout(poll, 5000); });
     })();
   }).catch(function(e){
-    btn.disabled = false; btn.textContent = "Send me a test alert NOW";
-    console.error("GMR: test dispatch failed", e);
+    btn.disabled = false; btn.textContent = orig;
+    console.error("GMR: dispatch failed", e);
     status.innerHTML = "<span class='down'>Dispatch failed -- see console.</span>";
   });
+}
+function sendTestAlert(){
+  dispatchAndPoll($("#test-alert-btn"), "Send test alert NOW", { test: "true" },
+    "If nothing arrived, no delivery channel is set (add NTFY_TOPIC / DISCORD_WEBHOOK / GMAIL_APP_PASSWORD).");
+}
+function checkAlertsNow(){
+  dispatchAndPoll($("#check-now-btn"), "Run my rules now", { test: "false" },
+    "Your real rules were evaluated. The log lists each rule&#39;s result (FIRE / suppressed / not met). Any that newly triggered were sent to your channels.");
 }
 
 function diagnoseSetup(){

@@ -352,6 +352,7 @@ def run_alert_check():
     fired = []
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    print(f"[GMR] Evaluating {len(rules)} enabled rule(s) at {now_iso}")
     for rule in rules:
         ticker = rule["ticker"]
         if ticker not in series_cache:
@@ -364,7 +365,10 @@ def run_alert_check():
         # Edge-triggered: only fire on the false->true transition, so the same
         # rule can re-arm later the same day if price crosses back and forth
         # (dedup key carries a full timestamp, not just a date -- gotcha #9).
-        if triggered and not prev["last_triggered"]:
+        will_fire = triggered and not prev["last_triggered"]
+        print(f"[GMR]   {ticker} {rule['type']}: triggered={triggered} [{detail}]"
+              f", already_active={prev['last_triggered']} -> {'FIRE' if will_fire else ('suppressed (still true since last run)' if triggered else 'not met')}")
+        if will_fire:
             fired.append((rule, detail))
             state[rule_key] = {"last_triggered": True, "last_fired_ts": now_iso}
         else:
@@ -373,7 +377,7 @@ def run_alert_check():
     save_json("data/alerts_state.json", state)
 
     if not fired:
-        print("[GMR] No new alert triggers this run.")
+        print("[GMR] No NEW alert triggers this run (rules that are already true stay suppressed until they reset & re-cross).")
         return
 
     lines = [f"- {r['ticker']}: {r['type']} ({detail})" for r, detail in fired]
