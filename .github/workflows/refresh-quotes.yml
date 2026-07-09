@@ -5,10 +5,12 @@ name: Refresh baked quotes
 
 on:
   schedule:
-    # every 30 min during US market hours (13:00-20:59 UTC, Mon-Fri)
-    - cron: "*/30 13-20 * * 1-5"
-    # once more after the close so the last bar is final
-    - cron: "30 21 * * 1-5"
+    # Every 30 min across US market hours in BOTH DST regimes.
+    # EDT (summer): 09:30-16:00 ET = 13:30-20:00 UTC. EST (winter): = 14:30-21:00 UTC.
+    - cron: "*/30 13-21 * * 1-5"
+    # Post-close snapshots so the final daily CLOSING bar is captured & committed:
+    - cron: "45 20 * * 1-5"   # ~45m after the EDT (summer) 16:00 ET close
+    - cron: "45 21 * * 1-5"   # ~45m after the EST (winter) 16:00 ET close
   workflow_dispatch: {}
 
 permissions:

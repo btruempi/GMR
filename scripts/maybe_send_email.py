@@ -211,25 +211,34 @@ def evaluate_rule(rule, series):
 
 
 def send_email(to_addr, cc_addrs, subject, body):
+    """Sends via Gmail SMTP. The SENDER is the Gmail account that owns the
+    GMAIL_APP_PASSWORD: set GMAIL_USER to that address to send to any recipient;
+    if GMAIL_USER is unset we assume the recipient itself is the Gmail account
+    (the common 'alert myself' case)."""
     password = os.environ.get("GMAIL_APP_PASSWORD")
-    if not password or not to_addr:
-        print(f"[GMR] Skipping send (missing GMAIL_APP_PASSWORD or recipient). Subject was: {subject}")
+    sender = (os.environ.get("GMAIL_USER") or to_addr or "").strip()
+    if not password or not sender:
+        print(f"[GMR] Skipping send (missing GMAIL_APP_PASSWORD or sender/recipient). Subject was: {subject}")
         return False
+    recipients = [r for r in ([to_addr] + [c for c in (cc_addrs or []) if c]) if r]
+    if not recipients:
+        recipients = [sender]
     msg = MIMEText(body)
     msg["Subject"] = subject
-    msg["From"] = to_addr
-    msg["To"] = to_addr
-    all_recipients = [to_addr] + [c for c in cc_addrs if c]
-    if cc_addrs:
-        msg["Cc"] = ", ".join([c for c in cc_addrs if c])
+    msg["From"] = sender
+    msg["To"] = to_addr or sender
+    cc = [c for c in (cc_addrs or []) if c]
+    if cc:
+        msg["Cc"] = ", ".join(cc)
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as server:
-            server.login(to_addr, password)
-            server.sendmail(to_addr, all_recipients, msg.as_string())
-        print(f"[GMR] Sent: {subject}")
+            server.login(sender, password)
+            server.sendmail(sender, recipients, msg.as_string())
+        print(f"[GMR] Sent '{subject}' from {sender} to {', '.join(recipients)}")
         return True
     except Exception as e:
-        print(f"[GMR] Email send failed: {e}")
+        print(f"[GMR] Email send FAILED: {e} -- check the Gmail address and that "
+              f"GMAIL_APP_PASSWORD is a 16-char App Password (not your login password), with 2FA enabled.")
         return False
 
 

@@ -3697,13 +3697,27 @@ function renderBasketWeb(sourceId){
   if (!src || !src.tickers.length){ root.innerHTML = "<p class='muted small'>Empty basket.</p>"; return; }
   var inBasket = {}; src.tickers.forEach(function(t){ inBasket[t.toUpperCase()]=1; });
 
-  var edges = (STATE.relationships.edges||[]).filter(function(e){
-    return enabled.indexOf(e.type)!==-1 && inBasket[e.a] && inBasket[e.b];
+  // Include ANY tie that touches a basket member, so related companies OUTSIDE
+  // the vertical (e.g., a utility's data-center customers) are pulled in to make
+  // the web full and complete. External nodes are marked so they read distinctly.
+  var relevant = {};
+  (STATE.relationships.edges||[]).forEach(function(e){
+    if (enabled.indexOf(e.type)===-1) return;
+    if (inBasket[e.a] || inBasket[e.b]){ relevant[e.a]=1; relevant[e.b]=1; }
   });
-  // nodes = basket members that participate in at least one shown edge
-  var nodeSet = {};
-  edges.forEach(function(e){ nodeSet[e.a]=1; nodeSet[e.b]=1; });
-  var nodes = Object.keys(nodeSet);
+  var edges = (STATE.relationships.edges||[]).filter(function(e){
+    return enabled.indexOf(e.type)!==-1 && relevant[e.a] && relevant[e.b];
+  });
+  var nodes = Object.keys(relevant);
+  // safety cap for very large scopes: keep basket members + highest-degree externals
+  if (nodes.length > 46){
+    var deg0 = {}; edges.forEach(function(e){ deg0[e.a]=(deg0[e.a]||0)+1; deg0[e.b]=(deg0[e.b]||0)+1; });
+    var keep = {}; nodes.filter(function(n){ return inBasket[n]; }).forEach(function(n){ keep[n]=1; });
+    var slots = Math.max(0, 46 - Object.keys(keep).length);
+    nodes.filter(function(n){ return !inBasket[n]; }).sort(function(a,b){ return (deg0[b]||0)-(deg0[a]||0); }).slice(0, slots).forEach(function(n){ keep[n]=1; });
+    nodes = nodes.filter(function(n){ return keep[n]; });
+    edges = edges.filter(function(e){ return keep[e.a] && keep[e.b]; });
+  }
 
   var legend = "<div class='row' id='kg-rel-filter' style='margin-bottom:6px'>" +
     Object.keys(types).map(function(t){
@@ -3770,17 +3784,22 @@ function renderBasketWeb(sourceId){
     nodes.forEach(function(n){
       var p=P[n]; var rad=14+Math.sqrt((capBy[n]||0)/maxCap)*16;
       var isHub = hubs.indexOf(n)!==-1;
+      var ext = !inBasket[n]; // related company pulled in from outside the basket
+      var fill = isHub ? "rgba(79,209,197,.22)" : (ext ? "rgba(147,162,187,.10)" : "var(--panel2)");
+      var stroke = isHub ? "#4fd1c5" : (ext ? "#3a4considered" : "#26324a");
+      stroke = isHub ? "#4fd1c5" : (ext ? "#5b8cff" : "#26324a");
       svg += "<g class='kg-rnode' data-web-node='"+esc(n)+"' style='cursor:pointer'>" +
-        "<circle cx='"+p.x.toFixed(1)+"' cy='"+p.y.toFixed(1)+"' r='"+rad.toFixed(1)+"' fill='"+(isHub?"rgba(79,209,197,.22)":"var(--panel2)")+"' stroke='"+(isHub?"#4fd1c5":"#26324a")+"' stroke-width='"+(isHub?2:1.4)+"'/>" +
-        "<text x='"+p.x.toFixed(1)+"' y='"+(p.y+4).toFixed(1)+"' text-anchor='middle' fill='#e7edf7' font-size='11' font-weight='700'>"+esc(n)+"</text></g>";
+        "<circle cx='"+p.x.toFixed(1)+"' cy='"+p.y.toFixed(1)+"' r='"+rad.toFixed(1)+"' fill='"+fill+"' stroke='"+stroke+"' stroke-width='"+(isHub?2:1.4)+"'"+(ext?" stroke-dasharray='3,2'":"")+"/>" +
+        "<text x='"+p.x.toFixed(1)+"' y='"+(p.y+4).toFixed(1)+"' text-anchor='middle' fill='"+(ext?"#c3ccd9":"#e7edf7")+"' font-size='11' font-weight='700'>"+esc(n)+"</text></g>";
     });
     svg += "</svg>";
 
+    var extCount = nodes.filter(function(n){ return !inBasket[n]; }).length;
     root.innerHTML = legend +
       "<div class='flex-between'><h3 style='margin:2px 0'>" + esc(src.label) + " &mdash; relationship web (" + nodes.length + " companies, " + edges.length + " ties)</h3></div>" +
-      "<p class='muted small' style='margin:0 0 6px'>Node size = market cap. The most-connected names (highlighted) are the cluster&#39;s key dependencies &mdash; e.g., a supplier the whole group relies on. Click a node to focus its own web.</p>" +
+      "<p class='muted small' style='margin:0 0 6px'>Node size = market cap. Highlighted = the cluster&#39;s key dependencies. <span style='color:#5b8cff'>Dashed nodes</span> are related companies from outside this basket (customers, suppliers) pulled in to complete the picture. Click any node to focus its own web.</p>" +
       "<div style='overflow-x:auto'>" + svg + "</div>" +
-      "<p class='footer-note'>Most-connected in this basket: <b>" + hubs.map(esc).join(", ") + "</b>. Curated relationships as of " + esc(STATE.relationships.updated||"") + " &mdash; illustrative, not exhaustive.</p>";
+      "<p class='footer-note'>Most-connected: <b>" + hubs.map(esc).join(", ") + "</b>" + (extCount?(" &middot; " + extCount + " related companies pulled in from outside the basket"):"") + ". Curated relationships as of " + esc(STATE.relationships.updated||"") + " &mdash; illustrative, not exhaustive.</p>";
 
     $all("[data-web-node]", root).forEach(function(el){ el.addEventListener("click", function(){ lsSet("kgTicker", el.getAttribute("data-web-node")); lsSet("kgRelScope","company"); showTab("moneyflow"); }); });
     bindBasketWebFilter(root, sourceId, enabled);
