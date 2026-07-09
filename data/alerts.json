@@ -2,8 +2,8 @@
   "channels": {
     "email": "",
     "sms": {
-      "number": "",
-      "carrier": ""
+      "number": "9524635930",
+      "carrier": "vtext.com"
     }
   },
   "rules": []
