@@ -316,9 +316,11 @@ def send_discord(title, body):
 
 def notify(channels, subject, body):
     """Deliver an alert over every configured channel. ntfy + Discord need no
-    personal email; email/SMS are optional."""
+    personal email; email/SMS are optional. The email recipient can be set via
+    the ALERT_EMAIL repo secret (keeps it private / out of the public repo);
+    otherwise it falls back to the address configured on the site."""
     sent = False
-    to_addr = channels.get("email")
+    to_addr = (os.environ.get("ALERT_EMAIL") or "").strip() or channels.get("email")
     if to_addr:
         sent = send_email(to_addr, [sms_gateway_address(channels)], subject, body) or sent
     sent = send_ntfy(subject, body) or sent
