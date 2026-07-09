@@ -2988,8 +2988,9 @@ RENDERERS.alerts = function(root){
         "</div>" +
       "</div>" +
       "<div class='section-title'>Optional: email &amp; text</div>" +
+      "<p class='muted small' style='margin:0 0 6px'>Recipient priority: if you set the <b>ALERT_EMAIL</b> repo secret it is used (and stays private). Otherwise the email you type below is used &mdash; note it gets pushed into your repo when you Arm alerts, so use the secret if you want it private.</p>" +
       "<div class='grid cols-2'>" +
-        "<div><label>Email (recipient)</label><input id='chan-email' type='email' value='" + esc((a.channels&&a.channels.email)||"") + "'></div>" +
+        "<div><label>Email (recipient &mdash; ignored if ALERT_EMAIL secret is set)</label><input id='chan-email' type='email' value='" + esc((a.channels&&a.channels.email)||"") + "'></div>" +
         "<div><label>Phone number (10 digits)</label><input id='chan-phone' type='password' autocomplete='off' value='" + esc((a.channels&&a.channels.sms&&a.channels.sms.number)||"") + "'></div>" +
         "<div><label>Carrier (SMS via email gateway)</label><select id='chan-carrier'>" +
           Object.keys(SMS_CARRIERS).map(function(k){ return "<option value='" + k + "'" + ((a.channels&&a.channels.sms&&a.channels.sms.carrier)===k?" selected":"") + ">" + SMS_CARRIERS[k] + "</option>"; }).join("") +
