@@ -6,5 +6,106 @@
       "carrier": "vtext.com"
     }
   },
-  "rules": []
+  "rules": [
+    {
+      "id": "5hxixolx",
+      "type": "pct_change",
+      "ticker": "RYCEY",
+      "params": {
+        "days": 1,
+        "pct": 1
+      },
+      "enabled": true
+    },
+    {
+      "id": "9jyu2ww0",
+      "type": "price_above",
+      "ticker": "TSLA",
+      "params": {
+        "price": 400
+      },
+      "enabled": true
+    },
+    {
+      "id": "cr955ee0",
+      "type": "price_below",
+      "ticker": "TSLA",
+      "params": {
+        "price": 390
+      },
+      "enabled": true
+    },
+    {
+      "id": "rd3s2zif",
+      "type": "volume_spike",
+      "ticker": "ATAI",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "zc1acrpw",
+      "type": "volume_spike",
+      "ticker": "NPCE",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "usnmmkxp",
+      "type": "volume_spike",
+      "ticker": "NERV",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "n5v6c3y7",
+      "type": "volume_spike",
+      "ticker": "NUCL",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "5chi1ovw",
+      "type": "volume_spike",
+      "ticker": "REX",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "crexq0z6",
+      "type": "volume_spike",
+      "ticker": "XERS",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "tluff1zp",
+      "type": "volume_spike",
+      "ticker": "NNE",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "el56lxpa",
+      "type": "volume_spike",
+      "ticker": "PAR",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    }
+  ]
 }
