@@ -80,38 +80,263 @@
       "enabled": true
     },
     {
-      "id": "tjprt8rz",
-      "type": "price_above",
-      "ticker": "RYCEY",
+      "id": "6detxr1s",
+      "type": "volume_spike",
+      "ticker": "TLN",
       "params": {
-        "price": 19.4
+        "multiplier": 2
       },
       "enabled": true
     },
     {
-      "id": "2uoqm1bz",
-      "type": "price_below",
-      "ticker": "RYCEY",
+      "id": "72hctu7o",
+      "type": "volume_spike",
+      "ticker": "LAAC",
       "params": {
-        "price": 19.25
+        "multiplier": 2
       },
       "enabled": true
     },
     {
-      "id": "s6l8k1g5",
-      "type": "price_below",
-      "ticker": "TSLA",
+      "id": "njgh9qqy",
+      "type": "volume_spike",
+      "ticker": "NXE",
       "params": {
-        "price": 403
+        "multiplier": 2
       },
       "enabled": true
     },
     {
-      "id": "wbmb16m0",
-      "type": "price_above",
-      "ticker": "TSLA",
+      "id": "r336n4ar",
+      "type": "volume_spike",
+      "ticker": "DNN",
       "params": {
-        "price": 405
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "3hq9drm9",
+      "type": "volume_spike",
+      "ticker": "EU",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "mkovnyb8",
+      "type": "volume_spike",
+      "ticker": "AGX",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "9ob2id8p",
+      "type": "volume_spike",
+      "ticker": "STRL",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "alh02bed",
+      "type": "volume_spike",
+      "ticker": "CLBT",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "wwsest5z",
+      "type": "volume_spike",
+      "ticker": "OKTA",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "4zssl8bg",
+      "type": "volume_spike",
+      "ticker": "APLD",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "9w2vw2py",
+      "type": "volume_spike",
+      "ticker": "VRT",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "zfceb9o1",
+      "type": "volume_spike",
+      "ticker": "VICR",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "oo4nhont",
+      "type": "volume_spike",
+      "ticker": "CRDO",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "bkj6szh0",
+      "type": "volume_spike",
+      "ticker": "STIM",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "fwf1hq95",
+      "type": "volume_spike",
+      "ticker": "NPCE",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "dx9m2sa7",
+      "type": "volume_spike",
+      "ticker": "NMTC",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "bb21s9wt",
+      "type": "volume_spike",
+      "ticker": "LIVN",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "hs8poa6c",
+      "type": "volume_spike",
+      "ticker": "IART",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "avgyr7dz",
+      "type": "volume_spike",
+      "ticker": "MDT",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "v5d5077f",
+      "type": "volume_spike",
+      "ticker": "BSX",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "mzf69ujq",
+      "type": "volume_spike",
+      "ticker": "NBIX",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "59d48fjt",
+      "type": "volume_spike",
+      "ticker": "BIIB",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "j6ia166u",
+      "type": "volume_spike",
+      "ticker": "INSP",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "9tbm8xpg",
+      "type": "volume_spike",
+      "ticker": "QSI",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "brb9u521",
+      "type": "volume_spike",
+      "ticker": "HYPR",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "7sykh5ez",
+      "type": "volume_spike",
+      "ticker": "NAUT",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "qcf5rbqw",
+      "type": "volume_spike",
+      "ticker": "BRKR",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "rwsmcqve",
+      "type": "volume_spike",
+      "ticker": "NSC",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "wv6hucn0",
+      "type": "volume_spike",
+      "ticker": "APP",
+      "params": {
+        "multiplier": 2
       },
       "enabled": true
     }
