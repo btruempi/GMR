@@ -1,5 +1,5 @@
 {
-  "active": "nuclear",
+  "active": "ai-infastructure",
   "lists": {
     "nuclear": {
       "label": "Nuclear",
@@ -63,7 +63,22 @@
     "neurotech": {
       "label": "Neurotech",
       "desc": "",
-      "tickers": [],
+      "tickers": [
+        "STIM",
+        "NMTC",
+        "NPCE",
+        "LIVN",
+        "IART",
+        "MDT",
+        "BSX",
+        "NBIX",
+        "BIIB",
+        "INSP",
+        "QSI",
+        "HYPR",
+        "NAUT",
+        "BRKR"
+      ],
       "indicators": {
         "sma": true,
         "ema": false,
@@ -125,7 +140,8 @@
         "KLAC",
         "ON",
         "MRVL",
-        "ADI"
+        "ADI",
+        "CRDO"
       ],
       "indicators": {
         "sma": true,
@@ -148,6 +164,29 @@
         "CVX",
         "ABT",
         "MCD"
+      ],
+      "indicators": {
+        "sma": true,
+        "ema": false,
+        "rsi": true,
+        "bollinger": false,
+        "macd": true,
+        "vwap": false
+      }
+    },
+    "ai-infastructure": {
+      "label": "AI Infastructure",
+      "desc": "",
+      "tickers": [
+        "AGX",
+        "STRL",
+        "CRDO",
+        "VICR",
+        "VRT",
+        "DELL",
+        "APLD",
+        "OKTA",
+        "CLBT"
       ],
       "indicators": {
         "sma": true,
