@@ -339,6 +339,78 @@
         "multiplier": 2
       },
       "enabled": true
+    },
+    {
+      "id": "l0qduwa2",
+      "type": "volume_spike",
+      "ticker": "TKR",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "tse18msj",
+      "type": "volume_spike",
+      "ticker": "RRX",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "w5uu4tdh",
+      "type": "volume_spike",
+      "ticker": "ALGM",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "ky28i7ep",
+      "type": "volume_spike",
+      "ticker": "NOVT",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "8u6ined3",
+      "type": "volume_spike",
+      "ticker": "VPG",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "azstmw6o",
+      "type": "volume_spike",
+      "ticker": "CGNX",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "wkdhz6l3",
+      "type": "volume_spike",
+      "ticker": "MP",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "vz2w6fug",
+      "type": "volume_spike",
+      "ticker": "MOG-A",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
     }
   ]
 }
