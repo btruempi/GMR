@@ -19,7 +19,9 @@
         "GEV",
         "TLN",
         "NNE",
-        "FLR"
+        "FLR",
+        "PDN",
+        "XE"
       ],
       "indicators": {
         "sma": true,
@@ -141,7 +143,11 @@
         "ON",
         "MRVL",
         "ADI",
-        "CRDO"
+        "CRDO",
+        "SNDK",
+        "TSEM",
+        "RMBS",
+        "FN"
       ],
       "indicators": {
         "sma": true,
@@ -186,7 +192,26 @@
         "DELL",
         "APLD",
         "OKTA",
-        "CLBT"
+        "CLBT",
+        "MOD",
+        "LITE",
+        "SNDK",
+        "TSEM",
+        "COHU",
+        "INOD",
+        "ETN",
+        "ANET",
+        "RMBS",
+        "FN",
+        "CALX",
+        "AMBA",
+        "RNCEY",
+        "MBLY",
+        "GLW",
+        "APH",
+        "CIEN",
+        "AXTI",
+        "VIAV"
       ],
       "indicators": {
         "sma": true,
