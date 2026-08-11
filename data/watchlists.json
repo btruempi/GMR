@@ -1,5 +1,5 @@
 {
-  "active": "ai-infastructure",
+  "active": "robotics",
   "lists": {
     "nuclear": {
       "label": "Nuclear",
@@ -187,6 +187,30 @@
         "APLD",
         "OKTA",
         "CLBT"
+      ],
+      "indicators": {
+        "sma": true,
+        "ema": false,
+        "rsi": true,
+        "bollinger": false,
+        "macd": true,
+        "vwap": false
+      }
+    },
+    "robotics": {
+      "label": "Robotics",
+      "desc": "",
+      "tickers": [
+        "TKR",
+        "RRX",
+        "ALGM",
+        "VPG",
+        "CGNX",
+        "MP",
+        "MOG-A",
+        "NOVT",
+        "HSYDF",
+        "NCTKY"
       ],
       "indicators": {
         "sma": true,
