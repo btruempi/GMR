@@ -1,5 +1,5 @@
 {
-  "active": "robotics",
+  "active": "ai-infastructure",
   "lists": {
     "nuclear": {
       "label": "Nuclear",
@@ -169,7 +169,8 @@
         "XOM",
         "CVX",
         "ABT",
-        "MCD"
+        "MCD",
+        "ET"
       ],
       "indicators": {
         "sma": true,
@@ -211,7 +212,25 @@
         "APH",
         "CIEN",
         "AXTI",
-        "VIAV"
+        "VIAV",
+        "AMAT",
+        "LRCX",
+        "ONTO",
+        "KLAC",
+        "TER",
+        "ATEYY",
+        "BESI",
+        "KLIC",
+        "ENTG",
+        "FIX",
+        "IESC",
+        "PWR",
+        "POWL",
+        "CARR",
+        "BDC",
+        "MLI",
+        "BE",
+        "MRVL"
       ],
       "indicators": {
         "sma": true,
@@ -235,7 +254,75 @@
         "MOG-A",
         "NOVT",
         "HSYDF",
-        "NCTKY"
+        "NCTKY",
+        "TELIF"
+      ],
+      "indicators": {
+        "sma": true,
+        "ema": false,
+        "rsi": true,
+        "bollinger": false,
+        "macd": true,
+        "vwap": false
+      }
+    },
+    "powergen": {
+      "label": "Powergen",
+      "desc": "",
+      "tickers": [
+        "HWM",
+        "GEV",
+        "BKR",
+        "CAT",
+        "CMI",
+        "WMB",
+        "ETN",
+        "EQT",
+        "BE"
+      ],
+      "indicators": {
+        "sma": true,
+        "ema": false,
+        "rsi": true,
+        "bollinger": false,
+        "macd": true,
+        "vwap": false
+      }
+    },
+    "quantum-computing": {
+      "label": "Quantum Computing",
+      "desc": "",
+      "tickers": [
+        "QBTS",
+        "IONQ",
+        "RGTI",
+        "QUBT",
+        "NVDA",
+        "MSFT",
+        "GOOGL",
+        "AMZN",
+        "IBM",
+        "LAES",
+        "ARQQ",
+        "HOLO"
+      ],
+      "indicators": {
+        "sma": true,
+        "ema": false,
+        "rsi": true,
+        "bollinger": false,
+        "macd": true,
+        "vwap": false
+      }
+    },
+    "hydrogen": {
+      "label": "Hydrogen",
+      "desc": "Hydrogen production and fuel-cell companies.",
+      "tickers": [
+        "PLUG",
+        "BE",
+        "BLDP",
+        "FCEL"
       ],
       "indicators": {
         "sma": true,
