@@ -600,6 +600,231 @@
         "multiplier": 2
       },
       "enabled": true
+    },
+    {
+      "id": "3ntz9t4m",
+      "type": "volume_spike",
+      "ticker": "AMAT",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "moxaa5kd",
+      "type": "volume_spike",
+      "ticker": "LRCX",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "fne5e6c9",
+      "type": "volume_spike",
+      "ticker": "ONTO",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "4cewthry",
+      "type": "volume_spike",
+      "ticker": "KLAC",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "chj4sju2",
+      "type": "volume_spike",
+      "ticker": "TER",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "1x4hoahm",
+      "type": "volume_spike",
+      "ticker": "ATEYY",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "7fznx8bw",
+      "type": "volume_spike",
+      "ticker": "BESI",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "isarrb0y",
+      "type": "volume_spike",
+      "ticker": "KLIC",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "cf863qga",
+      "type": "volume_spike",
+      "ticker": "ENTG",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "o49vn0pa",
+      "type": "volume_spike",
+      "ticker": "QBTS",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "fdnck33v",
+      "type": "volume_spike",
+      "ticker": "IONQ",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "aictcbel",
+      "type": "volume_spike",
+      "ticker": "RGTI",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "907g0u3n",
+      "type": "volume_spike",
+      "ticker": "QUBT",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "ikdb093w",
+      "type": "volume_spike",
+      "ticker": "LEAS",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "nsmhlvk7",
+      "type": "volume_spike",
+      "ticker": "ARQQ",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "xhd5qh5e",
+      "type": "volume_spike",
+      "ticker": "HOLO",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "8tuf9sqg",
+      "type": "volume_spike",
+      "ticker": "FIX",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "w8pu4cy9",
+      "type": "volume_spike",
+      "ticker": "IESC",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "ztolunso",
+      "type": "volume_spike",
+      "ticker": "PWR",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "qvcapgju",
+      "type": "volume_spike",
+      "ticker": "POWL",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "bwp104z5",
+      "type": "volume_spike",
+      "ticker": "CARR",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "wljau4uu",
+      "type": "volume_spike",
+      "ticker": "BDC",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "1oq2vavu",
+      "type": "volume_spike",
+      "ticker": "MLI",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "voq1zv4v",
+      "type": "volume_spike",
+      "ticker": "BE",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
+    },
+    {
+      "id": "agiir5ry",
+      "type": "volume_spike",
+      "ticker": "MRVL",
+      "params": {
+        "multiplier": 2
+      },
+      "enabled": true
     }
   ]
 }
