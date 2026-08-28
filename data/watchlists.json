@@ -1,5 +1,5 @@
 {
-  "active": "ai-infastructure",
+  "active": "powergen",
   "lists": {
     "nuclear": {
       "label": "Nuclear",
@@ -304,7 +304,10 @@
         "IBM",
         "LAES",
         "ARQQ",
-        "HOLO"
+        "HOLO",
+        "QNT",
+        "INFQ",
+        "XNDU"
       ],
       "indicators": {
         "sma": true,
